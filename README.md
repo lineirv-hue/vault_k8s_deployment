@@ -4,24 +4,39 @@ Kubernetes deployment examples for HashiCorp Vault.
 
 ## Files
 - `.gitignore` — ignores local artifacts and secrets
-- `k8s/vault-configmap.yaml` — Vault configuration stored in a ConfigMap
-- `k8s/vault-deployment.yaml` — Vault deployment manifest
-- `k8s/vault-service.yaml` — ClusterIP service for Vault
+- `terraform/` — Terraform configuration for Vault resources on Minikube
+- `k8s/vault-configmap.yaml` — Vault configuration stored in a ConfigMap (legacy kubectl manifests)
+- `k8s/vault-deployment.yaml` — Vault deployment manifest (legacy kubectl manifests)
+- `k8s/vault-service.yaml` — Vault service manifest (legacy kubectl manifests)
+- `k8s/vault-pv-pvc.yaml` — PersistentVolume and PersistentVolumeClaim for Minikube
+- `scripts/terraform-deploy.sh` — deploy Vault using Terraform
+- `scripts/terraform-destroy.sh` — destroy Vault resources with Terraform
+- `scripts/minikube-deploy.sh` — legacy kubectl-based deployment
+- `scripts/vault-init.sh` — initialize and configure Vault engines
 
-## Apply
+## Terraform deployment
+Use Terraform for the Vault deployment on Minikube:
 ```bash
-kubectl apply -f k8s/vault-configmap.yaml
-kubectl apply -f k8s/vault-pv-pvc.yaml
-kubectl apply -f k8s/vault-deployment.yaml
-kubectl apply -f k8s/vault-service.yaml
+./scripts/terraform-deploy.sh
 ```
 
-## Minikube deployment
-For local Minikube, use the included script:
+To destroy the deployment:
 ```bash
-./scripts/minikube-deploy.sh
+./scripts/terraform-destroy.sh
 ```
-By default, Vault is exposed on NodePort `32000`. If Minikube is installed, access it at `$(minikube ip):32000`.
+
+The Terraform configuration uses the Kubernetes provider and the Minikube kubeconfig. It deploys:
+- ConfigMap for `vault.hcl`
+- hostPath-backed PersistentVolume and PersistentVolumeClaim
+- Vault Deployment
+- NodePort Service on `32000`
+
+## Initialization and engine configuration
+After Terraform deploy, initialize Vault and enable the engines configured via `VAULT_ENGINES`:
+```bash
+cd /Users/irvingfarinas/vault_k8s_deployment
+./scripts/vault-init.sh
+```
 
 ## Initialization and engine configuration
 After deployment, initialize Vault and enable the engines configured via `VAULT_ENGINES`:
