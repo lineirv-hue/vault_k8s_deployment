@@ -28,8 +28,19 @@ if [[ "$initialized" == "False" ]]; then
   echo "Initializing Vault..."
   vault operator init -key-shares=$KEY_SHARES -key-threshold=$KEY_THRESHOLD -format=json > "$INIT_FILE"
   echo "Vault init output written to $INIT_FILE"
+
   ROOT_TOKEN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root_token"])' "$INIT_FILE")
   UNSEAL_KEY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unseal_keys_b64"][0])' "$INIT_FILE")
+
+  echo ""
+  echo "============================================"
+  echo " Vault Initialized Successfully"
+  echo "============================================"
+  echo " Root Token  : $ROOT_TOKEN"
+  echo " Recovery Key: $UNSEAL_KEY"
+  echo "============================================"
+  echo ""
+
   echo "Unsealing Vault..."
   vault operator unseal "$UNSEAL_KEY"
   vault login "$ROOT_TOKEN"

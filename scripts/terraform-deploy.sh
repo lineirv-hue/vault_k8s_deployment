@@ -20,17 +20,25 @@ KUBECONFIG_PATH=${KUBECONFIG:-~/.kube/config}
 
 echo "Initializing Terraform..."
 cd terraform
-terraform init
+terraform init -input=false
 
 echo "Applying Terraform configuration..."
-terraform apply -auto-approve -var="kubeconfig_path=$KUBECONFIG_PATH"
+terraform apply -auto-approve -input=false \
+  -var-file=terraform.tfvars.json \
+  -var="kubeconfig_path=$KUBECONFIG_PATH"
 
 NODE_PORT=$(terraform output -raw vault_service_node_port)
 
 if command -v minikube >/dev/null 2>&1; then
   MINIKUBE_IP=$(minikube ip)
-  echo "Vault should be available at: http://$MINIKUBE_IP:$NODE_PORT"
-  echo "You can also use: minikube service vault --url"
+  echo "Vault is available at: http://$MINIKUBE_IP:$NODE_PORT"
+  echo "Or use: minikube service vault --url"
 else
   echo "Vault NodePort is $NODE_PORT. Use your node IP to connect."
 fi
+
+echo ""
+echo "Initializing Vault..."
+cd "$repo_root"
+export VAULT_ADDR=${VAULT_ADDR:-"http://$(minikube ip 2>/dev/null || echo '127.0.0.1'):$NODE_PORT"}
+bash scripts/vault-init.sh

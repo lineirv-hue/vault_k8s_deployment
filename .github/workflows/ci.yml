@@ -16,11 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -62,7 +57,17 @@ jobs:
         run: |
           terraform validate
 
+      - name: Check kubeconfig connectivity
+        run: |
+          if ! kubectl cluster-info >/dev/null 2>&1; then
+            echo "Warning: kubeconfig not reachable — skipping terraform plan"
+            echo "SKIP_PLAN=true" >> "$GITHUB_ENV"
+          else
+            echo "SKIP_PLAN=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Terraform plan
+        if: env.SKIP_PLAN != 'true'
         working-directory: terraform
         run: |
           terraform plan -input=false -var-file=terraform.tfvars.json
