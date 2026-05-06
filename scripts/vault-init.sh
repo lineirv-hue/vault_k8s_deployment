@@ -29,12 +29,12 @@ fi
 export VAULT_ADDR
 
 echo "Checking Vault status at $VAULT_ADDR..."
-if vault status >/dev/null 2>&1; then
-  initialized=$(vault status -format=json | python3 -c 'import sys, json; print(json.load(sys.stdin)["initialized"])')
-else
+vault_status_json=$(vault status -format=json 2>/dev/null || true)
+if [[ -z "$vault_status_json" ]]; then
   echo "Vault is not reachable at $VAULT_ADDR"
   exit 1
 fi
+initialized=$(echo "$vault_status_json" | python3 -c 'import sys, json; print(json.load(sys.stdin)["initialized"])')
 
 if [[ "$initialized" == "False" ]]; then
   echo "Initializing Vault..."
