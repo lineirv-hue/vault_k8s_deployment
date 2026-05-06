@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+mkdir -p "$repo_root/logs"
+LOG_FILE=${LOG_FILE:-"$repo_root/logs/terraform-deploy-$(date +%Y%m%d-%H%M%S).log"}
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "Terraform deployment log: $LOG_FILE"
+
 if ! command -v terraform >/dev/null 2>&1; then
   echo "Terraform is required to deploy Vault via Terraform."
   echo "Install it from https://www.terraform.io/downloads"
   exit 1
 fi
 
-cd "$(dirname "$0")/.."
+cd "$repo_root"
 
 KUBECONFIG_PATH=${KUBECONFIG:-~/.kube/config}
 
