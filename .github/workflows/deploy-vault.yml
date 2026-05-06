@@ -34,6 +34,14 @@ jobs:
         working-directory: terraform
         run: terraform init -input=false
 
+      - name: Cleanup existing Kubernetes resources
+        run: |
+          kubectl delete configmap vault-config vault-logrotate --ignore-not-found
+          kubectl delete pvc vault-data-pvc --ignore-not-found
+          kubectl delete pv vault-data-pv --ignore-not-found
+          kubectl delete deployment vault --ignore-not-found
+          kubectl delete service vault --ignore-not-found
+
       - name: Terraform apply
         working-directory: terraform
         run: terraform apply -auto-approve -input=false -var-file=terraform.tfvars.json
