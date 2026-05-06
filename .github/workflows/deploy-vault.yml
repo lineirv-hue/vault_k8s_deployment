@@ -33,11 +33,12 @@ jobs:
 
       - name: Cleanup existing Kubernetes resources
         run: |
-          kubectl delete configmap vault-config vault-logrotate --ignore-not-found
-          kubectl delete pvc vault-data-pvc --ignore-not-found
-          kubectl delete pv vault-data-pv --ignore-not-found
-          kubectl delete deployment vault --ignore-not-found
-          kubectl delete service vault --ignore-not-found
+          kubectl delete deployment vault --ignore-not-found --wait=false
+          kubectl delete service vault --ignore-not-found --wait=false
+          kubectl delete configmap vault-config vault-logrotate --ignore-not-found --wait=false
+          kubectl delete pvc vault-data-pvc --ignore-not-found --wait=false
+          kubectl patch pv vault-data-pv -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+          kubectl delete pv vault-data-pv --ignore-not-found --wait=false
 
       - name: Deploy Vault
         run: bash scripts/terraform-deploy.sh
