@@ -61,8 +61,10 @@ resource "kubernetes_persistent_volume" "vault_data" {
     persistent_volume_reclaim_policy = "Retain"
     storage_class_name               = "manual"
 
-    host_path {
-      path = var.pv_host_path
+    persistent_volume_source {
+      host_path {
+        path = var.pv_host_path
+      }
     }
   }
 }
