@@ -18,10 +18,11 @@ if ! command -v vault >/dev/null 2>&1; then
   else
     ARCH="amd64"
   fi
+  mkdir -p "$HOME/bin"
   curl -fsSL "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_${OS}_${ARCH}.zip" -o /tmp/vault.zip
-  unzip -o /tmp/vault.zip -d /tmp/vault-bin
-  sudo mv /tmp/vault-bin/vault /usr/local/bin/vault
-  rm -rf /tmp/vault.zip /tmp/vault-bin
+  unzip -o /tmp/vault.zip -d "$HOME/bin"
+  rm -f /tmp/vault.zip
+  export PATH="$HOME/bin:$PATH"
   echo "Vault CLI installed: $(vault version)"
 fi
 
