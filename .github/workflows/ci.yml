@@ -28,11 +28,17 @@ jobs:
 
       - name: Verify shell scripts
         run: |
-          if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y shellcheck
-          elif command -v brew >/dev/null 2>&1; then
-            brew install shellcheck || true
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update -y
+              sudo apt-get install -y shellcheck
+            elif command -v brew >/dev/null 2>&1; then
+              if [[ "$(uname -m)" == "arm64" ]]; then
+                arch -arm64 brew install shellcheck || true
+              else
+                brew install shellcheck || true
+              fi
+            fi
           fi
           if command -v shellcheck >/dev/null 2>&1; then
             find scripts -name '*.sh' -print0 | xargs -0 shellcheck
