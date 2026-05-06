@@ -30,10 +30,6 @@ jobs:
         with:
           terraform_version: "1.6.5"
 
-      - name: Terraform init
-        working-directory: terraform
-        run: terraform init -input=false
-
       - name: Cleanup existing Kubernetes resources
         run: |
           kubectl delete configmap vault-config vault-logrotate --ignore-not-found
@@ -42,11 +38,9 @@ jobs:
           kubectl delete deployment vault --ignore-not-found
           kubectl delete service vault --ignore-not-found
 
-      - name: Terraform apply
-        working-directory: terraform
-        run: terraform apply -auto-approve -input=false -var-file=terraform.tfvars.json
+      - name: Deploy Vault
+        run: bash scripts/terraform-deploy.sh
 
-      - name: Terraform destroy
+      - name: Destroy Vault
         if: always()
-        working-directory: terraform
-        run: terraform destroy -auto-approve -input=false -var-file=terraform.tfvars.json
+        run: bash scripts/terraform-destroy.sh
