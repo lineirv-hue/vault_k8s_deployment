@@ -96,6 +96,8 @@ resource "kubernetes_deployment" "vault" {
     }
   }
 
+  wait_for_rollout = false
+
   spec {
     replicas = 1
 
@@ -147,7 +149,7 @@ resource "kubernetes_deployment" "vault" {
           image   = "alpine:3.18"
           command = ["/bin/sh", "-c"]
           args = [
-            "apk add --no-cache logrotate >/dev/null 2>&1 && while true; do logrotate /etc/logrotate.d/vault; sleep 60; done",
+            "apk add --no-cache logrotate >/dev/null 2>&1; while true; do logrotate /etc/logrotate.d/vault 2>/dev/null || true; sleep 60; done",
           ]
 
           volume_mount {
