@@ -69,3 +69,39 @@ variable "vault_log_level" {
   description = "Vault log level."
   default     = "info"
 }
+
+variable "vault_log_dir" {
+  type        = string
+  description = "Directory to store Vault logs in the container."
+  default     = "/vault/logs"
+}
+
+variable "vault_log_file" {
+  type        = string
+  description = "Log filename for Vault output."
+  default     = "vault.log"
+}
+
+variable "vault_rotate_size" {
+  type        = string
+  description = "Maximum log file size before rotation."
+  default     = "50M"
+}
+
+variable "vault_rotate_rotate" {
+  type        = number
+  description = "Number of rotated log files to keep."
+  default     = 5
+}
+
+variable "vault_rotate_compress" {
+  type        = bool
+  description = "Compress rotated log files."
+  default     = true
+}
+
+variable "vault_rotate_copytruncate" {
+  type        = bool
+  description = "Use copytruncate when rotating logs."
+  default     = true
+}

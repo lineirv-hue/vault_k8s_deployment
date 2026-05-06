@@ -28,6 +28,26 @@ resource "kubernetes_config_map" "vault_config" {
   }
 }
 
+resource "kubernetes_config_map" "vault_logrotate" {
+  metadata {
+    name      = "vault-logrotate"
+    namespace = var.namespace
+  }
+
+  data = {
+    "vault" = <<-EOT
+      ${var.vault_log_dir}/${var.vault_log_file} {
+        size ${var.vault_rotate_size}
+        ${var.vault_rotate_copytruncate ? "copytruncate" : ""}
+        rotate ${var.vault_rotate_rotate}
+        ${var.vault_rotate_compress ? "compress" : ""}
+        missingok
+        notifempty
+      }
+      EOT
+  }
+}
+
 resource "kubernetes_persistent_volume" "vault_data" {
   metadata {
     name = "vault-data-pv"
@@ -94,10 +114,9 @@ resource "kubernetes_deployment" "vault" {
         container {
           name  = "vault"
           image = var.vault_image
-
+          command = ["/bin/sh", "-c"]
           args = [
-            "server",
-            "-config=/vault/config/vault.hcl",
+            "vault server -config=/vault/config/vault.hcl 2>&1 | tee ${var.vault_log_dir}/${var.vault_log_file}",
           ]
 
           port {
@@ -114,6 +133,30 @@ resource "kubernetes_deployment" "vault" {
             name       = "vault-data"
             mount_path = "/vault/data"
           }
+
+          volume_mount {
+            name       = "vault-logs"
+            mount_path = var.vault_log_dir
+          }
+        }
+
+        container {
+          name  = "vault-logrotate"
+          image = "alpine:3.18"
+          command = ["/bin/sh", "-c"]
+          args = [
+            "apk add --no-cache logrotate >/dev/null 2>&1 && while true; do logrotate /etc/logrotate.d/vault; sleep 60; done",
+          ]
+
+          volume_mount {
+            name       = "vault-logs"
+            mount_path = var.vault_log_dir
+          }
+
+          volume_mount {
+            name       = "vault-logrotate-conf"
+            mount_path = "/etc/logrotate.d"
+          }
         }
 
         volume {
@@ -129,6 +172,19 @@ resource "kubernetes_deployment" "vault" {
 
           persistent_volume_claim {
             claim_name = kubernetes_persistent_volume_claim.vault_data.metadata[0].name
+          }
+        }
+
+        volume {
+          name = "vault-logs"
+          empty_dir {}
+        }
+
+        volume {
+          name = "vault-logrotate-conf"
+
+          config_map {
+            name = kubernetes_config_map.vault_logrotate.metadata[0].name
           }
         }
       }
