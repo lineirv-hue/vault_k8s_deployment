@@ -33,11 +33,7 @@ jobs:
               sudo apt-get update -y
               sudo apt-get install -y shellcheck
             elif command -v brew >/dev/null 2>&1; then
-              if [[ "$(uname -m)" == "arm64" ]]; then
-                arch -arm64 brew install shellcheck || true
-              else
-                brew install shellcheck || true
-              fi
+              brew install shellcheck || true
             fi
           fi
           if command -v shellcheck >/dev/null 2>&1; then

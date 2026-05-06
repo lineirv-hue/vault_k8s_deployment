@@ -11,11 +11,7 @@ ROOT_SECRET_PATH=${ROOT_SECRET_PATH:-vault/root}
 if ! command -v vault >/dev/null 2>&1; then
   echo "Vault CLI not found. Attempting to install..."
   if command -v brew >/dev/null 2>&1; then
-    if [[ "$(uname -m)" == "arm64" ]]; then
-      arch -arm64 brew install hashicorp/tap/vault
-    else
-      brew install hashicorp/tap/vault
-    fi
+    brew install hashicorp/tap/vault
   elif command -v apt-get >/dev/null 2>&1; then
     curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
     echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
