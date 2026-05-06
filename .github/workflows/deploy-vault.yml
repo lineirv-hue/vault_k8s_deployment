@@ -37,3 +37,8 @@ jobs:
       - name: Terraform apply
         working-directory: terraform
         run: terraform apply -auto-approve -input=false -var-file=terraform.tfvars.json
+
+      - name: Terraform destroy
+        if: always()
+        working-directory: terraform
+        run: terraform destroy -auto-approve -input=false -var-file=terraform.tfvars.json
