@@ -20,7 +20,7 @@ Use Terraform for the Vault deployment on Minikube:
 ./scripts/terraform-deploy.sh
 ```
 
-Terraform reads default values from `terraform/terraform.tfvars.json`. Edit that file to customize values such as `kubeconfig_path`, `namespace`, `vault_image`, `node_port`, and `pv_host_path`.
+Terraform reads default values from `terraform/terraform.tfvars.json`. Edit that file to customize values such as `kubeconfig_path`, `namespace`, `vault_image`, `node_port`, `pv_host_path`, and Vault-specific configuration like `vault_ui_enabled`, `vault_tls_disable`, and `vault_log_level`.
 
 To destroy the deployment:
 ```bash

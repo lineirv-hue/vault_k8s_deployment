@@ -27,3 +27,45 @@ variable "pv_host_path" {
   description = "Host path used for the Vault PersistentVolume in Minikube."
   default     = "/tmp/vault-data"
 }
+
+variable "vault_ui_enabled" {
+  type        = bool
+  description = "Whether Vault UI should be enabled."
+  default     = true
+}
+
+variable "vault_listener_address" {
+  type        = string
+  description = "Vault listener address."
+  default     = "0.0.0.0"
+}
+
+variable "vault_listener_port" {
+  type        = number
+  description = "Vault listener port."
+  default     = 8200
+}
+
+variable "vault_tls_disable" {
+  type        = bool
+  description = "Disable TLS for Vault listener."
+  default     = true
+}
+
+variable "vault_storage_path" {
+  type        = string
+  description = "Path to persist Vault data inside the container."
+  default     = "/vault/data"
+}
+
+variable "vault_disable_mlock" {
+  type        = bool
+  description = "Disable mlock for Vault process."
+  default     = true
+}
+
+variable "vault_log_level" {
+  type        = string
+  description = "Vault log level."
+  default     = "info"
+}

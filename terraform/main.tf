@@ -10,18 +10,20 @@ resource "kubernetes_config_map" "vault_config" {
 
   data = {
     "vault.hcl" = <<-EOT
-      ui = true
+      ui = ${var.vault_ui_enabled}
 
       listener "tcp" {
-        address     = "0.0.0.0:8200"
-        tls_disable = 1
+        address     = "${var.vault_listener_address}"
+        port        = ${var.vault_listener_port}
+        tls_disable = ${var.vault_tls_disable}
       }
 
       storage "file" {
-        path = "/vault/data"
+        path = "${var.vault_storage_path}"
       }
 
-      disable_mlock = true
+      disable_mlock = ${var.vault_disable_mlock}
+      log_level = "${var.vault_log_level}"
       EOT
   }
 }
