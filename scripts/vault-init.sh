@@ -3,9 +3,10 @@ set -euo pipefail
 
 VAULT_ADDR=${VAULT_ADDR:-http://127.0.0.1:8200}
 INIT_FILE=${INIT_FILE:-vault-init.json}
-ENGINES=${VAULT_ENGINES:-kv:secret,transit:transit}
+ENGINES=${VAULT_ENGINES:-kv:vault,transit:transit}
 KEY_SHARES=${KEY_SHARES:-1}
 KEY_THRESHOLD=${KEY_THRESHOLD:-1}
+ROOT_SECRET_PATH=${ROOT_SECRET_PATH:-vault/root}
 
 if ! command -v vault >/dev/null 2>&1; then
   echo "Vault CLI is required to initialize and configure Vault."
@@ -60,5 +61,14 @@ for mount in "${mounts[@]}"; do
     vault kv enable-version -version=2 "$path" || true
   fi
 done
+
+if [[ -n "${ROOT_TOKEN:-}" && -n "${UNSEAL_KEY:-}" ]]; then
+  echo "Saving root token and recovery key to KV at $ROOT_SECRET_PATH..."
+  vault kv put "$ROOT_SECRET_PATH" \
+    root_token="$ROOT_TOKEN" \
+    recovery_key="$UNSEAL_KEY" || true
+else
+  echo "Warning: root token or recovery key not available for storage in KV."
+fi
 
 echo "Vault initialization and engine configuration complete."

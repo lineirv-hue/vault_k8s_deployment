@@ -46,12 +46,14 @@ cd /Users/irvingfarinas/vault_k8s_deployment
 ```
 
 The script defaults to enabling:
-- `kv` at `secret`
+- `kv` at `vault`
 - `transit` at `transit`
+
+The generated Vault root token and recovery key are saved in KV at `vault/root`.
 
 To customize engines, set `VAULT_ENGINES` as a comma-separated list of `type:path` mounts. Example:
 ```bash
-VAULT_ENGINES="kv:secret,transit:transit" ./scripts/vault-init.sh
+VAULT_ENGINES="kv:vault,transit:transit" ./scripts/vault-init.sh
 ```
 
 ## Notes
