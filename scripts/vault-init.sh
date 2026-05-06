@@ -9,17 +9,20 @@ KEY_THRESHOLD=${KEY_THRESHOLD:-1}
 ROOT_SECRET_PATH=${ROOT_SECRET_PATH:-vault/root}
 
 if ! command -v vault >/dev/null 2>&1; then
-  echo "Vault CLI not found. Attempting to install..."
-  if command -v brew >/dev/null 2>&1; then
-    brew install hashicorp/tap/vault
-  elif command -v apt-get >/dev/null 2>&1; then
-    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-    sudo apt-get update -y && sudo apt-get install -y vault
+  echo "Vault CLI not found. Installing from HashiCorp releases..."
+  VAULT_VERSION="1.15.2"
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ARCH="$(uname -m)"
+  if [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then
+    ARCH="arm64"
   else
-    echo "Cannot install Vault CLI automatically. Install it from https://www.vaultproject.io/downloads"
-    exit 1
+    ARCH="amd64"
   fi
+  curl -fsSL "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_${OS}_${ARCH}.zip" -o /tmp/vault.zip
+  unzip -o /tmp/vault.zip -d /tmp/vault-bin
+  sudo mv /tmp/vault-bin/vault /usr/local/bin/vault
+  rm -rf /tmp/vault.zip /tmp/vault-bin
+  echo "Vault CLI installed: $(vault version)"
 fi
 
 export VAULT_ADDR
