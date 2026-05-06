@@ -13,8 +13,7 @@ resource "kubernetes_config_map" "vault_config" {
       ui = ${var.vault_ui_enabled}
 
       listener "tcp" {
-        address     = "${var.vault_listener_address}"
-        port        = ${var.vault_listener_port}
+        address     = "${var.vault_listener_address}:${var.vault_listener_port}"
         tls_disable = ${var.vault_tls_disable}
       }
 
