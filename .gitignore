@@ -1,0 +1,21 @@
+.DS_Store
+
+# Kubernetes and manifests
+*.log
+
+# Local environment
+.env
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# SSL / private keys
+*.pem
+*.key
+*.crt
+
+# IDEs
+.vscode/
+.idea/
