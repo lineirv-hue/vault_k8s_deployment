@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VAULT_ADDR=${VAULT_ADDR:-http://127.0.0.1:8200}
+INIT_FILE=${INIT_FILE:-vault-init.json}
+ENGINES=${VAULT_ENGINES:-kv:secret,transit:transit}
+KEY_SHARES=${KEY_SHARES:-1}
+KEY_THRESHOLD=${KEY_THRESHOLD:-1}
+
+if ! command -v vault >/dev/null 2>&1; then
+  echo "Vault CLI is required to initialize and configure Vault."
+  echo "Install it from https://www.vaultproject.io/downloads"
+  exit 1
+fi
+
+export VAULT_ADDR
+
+echo "Checking Vault status at $VAULT_ADDR..."
+if vault status >/dev/null 2>&1; then
+  initialized=$(vault status -format=json | python3 -c 'import sys, json; print(json.load(sys.stdin)["initialized"])')
+else
+  echo "Vault is not reachable at $VAULT_ADDR"
+  exit 1
+fi
+
+if [[ "$initialized" == "False" ]]; then
+  echo "Initializing Vault..."
+  vault operator init -key-shares=$KEY_SHARES -key-threshold=$KEY_THRESHOLD -format=json > "$INIT_FILE"
+  echo "Vault init output written to $INIT_FILE"
+  ROOT_TOKEN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root_token"])' "$INIT_FILE")
+  UNSEAL_KEY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unseal_keys_b64"][0])' "$INIT_FILE")
+  echo "Unsealing Vault..."
+  vault operator unseal "$UNSEAL_KEY"
+  vault login "$ROOT_TOKEN"
+else
+  echo "Vault is already initialized. Skipping initialization."
+  if [[ -n "${ROOT_TOKEN:-}" ]]; then
+    vault login "$ROOT_TOKEN"
+  fi
+fi
+
+if [[ -z "${VAULT_TOKEN:-}" ]]; then
+  if [[ -f "$INIT_FILE" ]]; then
+    export VAULT_TOKEN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root_token"])' "$INIT_FILE")
+  else
+    echo "VAULT_TOKEN is not set and $INIT_FILE is not available."
+    echo "Set VAULT_TOKEN or provide $INIT_FILE to continue."
+    exit 1
+  fi
+fi
+
+echo "Enabling configured engines: $ENGINES"
+IFS=',' read -ra mounts <<< "$ENGINES"
+for mount in "${mounts[@]}"; do
+  type=${mount%%:*}
+  path=${mount#*:}
+  echo "Enabling secrets engine '$type' at path '$path'..."
+  vault secrets enable -path="$path" "$type" || true
+  if [[ "$type" == "kv" ]]; then
+    vault kv enable-version -version=2 "$path" || true
+  fi
+done
+
+echo "Vault initialization and engine configuration complete."

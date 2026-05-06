@@ -5,10 +5,11 @@ metadata:
   labels:
     app: vault
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
     - name: http
       port: 8200
       targetPort: vault
+      nodePort: 32000
   selector:
     app: vault
