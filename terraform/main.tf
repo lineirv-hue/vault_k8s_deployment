@@ -57,9 +57,9 @@ resource "kubernetes_persistent_volume" "vault_data" {
     capacity = {
       storage = "1Gi"
     }
-    access_modes                   = ["ReadWriteOnce"]
+    access_modes                     = ["ReadWriteOnce"]
     persistent_volume_reclaim_policy = "Retain"
-    storage_class_name             = "manual"
+    storage_class_name               = "manual"
 
     host_path {
       path = var.pv_host_path
@@ -74,7 +74,7 @@ resource "kubernetes_persistent_volume_claim" "vault_data" {
   }
 
   spec {
-    access_modes      = ["ReadWriteOnce"]
+    access_modes       = ["ReadWriteOnce"]
     storage_class_name = "manual"
 
     resources {
@@ -112,8 +112,8 @@ resource "kubernetes_deployment" "vault" {
 
       spec {
         container {
-          name  = "vault"
-          image = var.vault_image
+          name    = "vault"
+          image   = var.vault_image
           command = ["/bin/sh", "-c"]
           args = [
             "vault server -config=/vault/config/vault.hcl 2>&1 | tee ${var.vault_log_dir}/${var.vault_log_file}",
@@ -141,8 +141,8 @@ resource "kubernetes_deployment" "vault" {
         }
 
         container {
-          name  = "vault-logrotate"
-          image = "alpine:3.18"
+          name    = "vault-logrotate"
+          image   = "alpine:3.18"
           command = ["/bin/sh", "-c"]
           args = [
             "apk add --no-cache logrotate >/dev/null 2>&1 && while true; do logrotate /etc/logrotate.d/vault; sleep 60; done",
