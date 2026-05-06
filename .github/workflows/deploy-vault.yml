@@ -40,5 +40,18 @@ jobs:
           kubectl patch pv vault-data-pv -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
           kubectl delete pv vault-data-pv --ignore-not-found --wait=false
 
+      - name: Wait for resources to finish terminating
+        run: |
+          echo "Waiting for PVC to terminate..."
+          until ! kubectl get pvc vault-data-pvc 2>/dev/null | grep -q vault-data-pvc; do
+            echo "PVC still terminating..."; sleep 3
+          done
+          echo "Waiting for PV to terminate..."
+          until ! kubectl get pv vault-data-pv 2>/dev/null | grep -q vault-data-pv; do
+            kubectl patch pv vault-data-pv -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+            echo "PV still terminating..."; sleep 3
+          done
+          echo "All resources terminated."
+
       - name: Deploy Vault
         run: bash scripts/terraform-deploy.sh
