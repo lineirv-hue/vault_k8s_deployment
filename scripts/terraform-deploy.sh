@@ -38,6 +38,9 @@ else
 fi
 
 echo ""
+echo "Waiting for Vault pod to be ready..."
+kubectl wait --for=condition=ready pod -l app=vault --timeout=180s
+
 echo "Initializing Vault..."
 cd "$repo_root"
 export VAULT_ADDR=${VAULT_ADDR:-"http://$(minikube ip 2>/dev/null || echo '127.0.0.1'):$NODE_PORT"}
