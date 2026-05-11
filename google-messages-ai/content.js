@@ -583,6 +583,13 @@ function buildPanel() {
 function buildFAB() {
   if (document.getElementById('mai-fab')) return;
 
+  // document.body can be null while the SPA is still bootstrapping
+  const target = document.body ?? document.documentElement;
+  if (!target) {
+    console.warn('[MsgAI] No mount target yet, will retry…');
+    return;
+  }
+
   const fab = document.createElement('button');
   fab.id = 'mai-fab';
   fab.className = 'mai-fab';
@@ -596,28 +603,37 @@ function buildFAB() {
       buildPanel();
     }
   };
-  document.body.appendChild(fab);
-  log('info', 'FAB added — click 🤖 to open the assistant');
+  target.appendChild(fab);
+  console.log('[MsgAI] ✅ FAB mounted — click 🤖 to open');
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
-function init() {
-  buildFAB();
+function tryInit() {
+  try {
+    buildFAB();
+  } catch (e) {
+    console.error('[MsgAI] init error:', e);
+  }
 }
 
-// Re-attach FAB on SPA navigation
+// Keep FAB alive through SPA re-renders and body replacements
+setInterval(() => {
+  if (!document.getElementById('mai-fab')) tryInit();
+}, 1500);
+
+// Re-attach on SPA navigation (URL change without page reload)
 let lastHref = location.href;
 new MutationObserver(() => {
   if (location.href !== lastHref) {
     lastHref = location.href;
-    log('info', `Navigation: ${lastHref}`);
-    if (!document.getElementById('mai-fab')) buildFAB();
+    console.log('[MsgAI] Navigation:', lastHref);
+    tryInit();
   }
 }).observe(document, { subtree: true, childList: true });
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+// Boot attempts — staggered to handle slow SPA render
+tryInit();
+setTimeout(tryInit, 300);
+setTimeout(tryInit, 1000);
+setTimeout(tryInit, 3000);
