@@ -330,7 +330,7 @@ function onInsert() {
     setStatus('Nothing to insert — generate a response first', 'warn');
     return;
   }
-  const ok = insertIntoCompose(text);
+  const ok = insertIntoCompose('My AI Response: ' + text);
   if (ok) setStatus('Inserted into compose box!', 'success');
   else    setStatus('Could not find compose box — see debug log', 'error');
 }
