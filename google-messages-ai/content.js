@@ -42,9 +42,8 @@ Write ONLY the reply text. No quotes, labels, or explanations.`
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
-let debugLogs  = [];
-let panelOpen  = false;
-let activePort = null;
+let debugLogs = [];
+let panelOpen = false;
 
 // ─── DOM helper (no innerHTML — Trusted Types safe) ─────────────────────────
 
@@ -110,47 +109,48 @@ function refreshDebugUI() {
   }
 }
 
-// ─── Ollama via background port ──────────────────────────────────────────────
+// ─── Ollama via CustomEvent bridge (chrome.runtime lives in isolated world) ──
+// content.js runs in MAIN world — no chrome.* APIs available here.
+// We dispatch CustomEvents that content-bridge.js (isolated world) handles,
+// and it relays chunks back as CustomEvents.
 
 function generateWithOllama(systemPrompt, prompt, model, onChunk) {
   return new Promise((resolve, reject) => {
-    if (activePort) { try { activePort.disconnect(); } catch (_) {} }
+    // Cancel any in-flight generation
+    window.dispatchEvent(new CustomEvent('mai-generate-cancel'));
 
-    const port = chrome.runtime.connect({ name: 'mai-generate' });
-    activePort = port;
+    const onChunkEvt = e => onChunk(e.detail.text);
+    const onDoneEvt  = e => { cleanup(); resolve(e.detail.text); };
+    const onErrorEvt = e => { cleanup(); reject(new Error(e.detail.message)); };
 
-    port.onMessage.addListener(msg => {
-      if (msg.type === 'chunk') {
-        onChunk(msg.text);
-      } else if (msg.type === 'done') {
-        onChunk(msg.text);
-        activePort = null;
-        resolve(msg.text);
-      } else if (msg.type === 'error') {
-        activePort = null;
-        reject(new Error(msg.message));
-      }
-    });
+    function cleanup() {
+      window.removeEventListener('mai-generate-chunk', onChunkEvt);
+      window.removeEventListener('mai-generate-done',  onDoneEvt);
+      window.removeEventListener('mai-generate-error', onErrorEvt);
+    }
 
-    port.onDisconnect.addListener(() => {
-      activePort = null;
-      const err = chrome.runtime.lastError;
-      if (err) reject(new Error(err.message));
-    });
+    window.addEventListener('mai-generate-chunk', onChunkEvt);
+    window.addEventListener('mai-generate-done',  onDoneEvt);
+    window.addEventListener('mai-generate-error', onErrorEvt);
 
-    port.postMessage({ systemPrompt, prompt, model });
+    window.dispatchEvent(new CustomEvent('mai-generate-request', {
+      detail: { systemPrompt, prompt, model }
+    }));
   });
 }
 
 function checkOllamaStatus() {
   return new Promise(resolve => {
-    chrome.runtime.sendMessage({ type: 'ollama-check' }, response => {
-      if (chrome.runtime.lastError) {
-        resolve({ ok: false, error: chrome.runtime.lastError.message });
-      } else {
-        resolve(response);
-      }
-    });
+    const onResult = e => {
+      window.removeEventListener('mai-ollama-result', onResult);
+      resolve(e.detail);
+    };
+    window.addEventListener('mai-ollama-result', onResult);
+    window.dispatchEvent(new CustomEvent('mai-ollama-check'));
+    setTimeout(() => {
+      window.removeEventListener('mai-ollama-result', onResult);
+      resolve({ ok: false, error: 'Bridge timeout — extension may need reload' });
+    }, 5000);
   });
 }
 
