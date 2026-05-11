@@ -154,6 +154,100 @@ function checkOllamaStatus() {
   });
 }
 
+// ─── Conversation list (sidebar) ────────────────────────────────────────────
+
+function readConversationList() {
+  const selectors = [
+    'mws-conversation-list-item',
+    '[data-e2e-conversation-id]',
+    '.conv-container',
+    'mws-conversations-list .mat-list-item'
+  ];
+
+  let items = null, usedSel = null;
+  for (const sel of selectors) {
+    const found = document.querySelectorAll(sel);
+    if (found.length > 0) { items = found; usedSel = sel; break; }
+  }
+
+  if (!items) {
+    log('warn', 'Could not find conversation list in sidebar');
+    return [];
+  }
+
+  log('info', `Sidebar: ${items.length} conversations via ${usedSel}`);
+
+  const conversations = [];
+  items.forEach((item, idx) => {
+    const nameSelectors = ['.contact-name', 'h3', '[data-e2e-conversation-name]', '.name', 'span'];
+    let name = null;
+    for (const sel of nameSelectors) {
+      const node = item.querySelector(sel);
+      const t = node?.textContent?.trim();
+      if (t && t.length > 0 && t.length < 80) { name = t; break; }
+    }
+    if (!name) name = item.textContent?.trim()?.split('\n')[0]?.trim();
+    if (!name) return;
+
+    const id = item.getAttribute('data-e2e-conversation-id')
+      ?? item.getAttribute('data-conversation-id')
+      ?? `conv-${idx}`;
+
+    conversations.push({ name, id });
+  });
+
+  return conversations;
+}
+
+function getAllowedConvs() {
+  try { return JSON.parse(localStorage.getItem('mai_allowed_convs') || '[]'); }
+  catch (_) { return []; }
+}
+
+function saveAllowedConvs(list) {
+  localStorage.setItem('mai_allowed_convs', JSON.stringify(list));
+}
+
+function refreshConvList() {
+  const container = document.getElementById('mai-conv-list');
+  if (!container) return;
+
+  container.textContent = '';
+  const conversations = readConversationList();
+  const allowed = getAllowedConvs();
+
+  if (conversations.length === 0) {
+    container.appendChild(el('div', { className: 'mai-conv-empty' },
+      'No conversations found — make sure the sidebar is visible'));
+    return;
+  }
+
+  conversations.forEach(conv => {
+    const cbId = `mai-cb-${conv.id}`;
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = cbId;
+    checkbox.className = 'mai-conv-checkbox';
+    checkbox.checked = allowed.includes(conv.name);
+
+    checkbox.onchange = () => {
+      const current = getAllowedConvs();
+      if (checkbox.checked) {
+        if (!current.includes(conv.name)) current.push(conv.name);
+      } else {
+        const i = current.indexOf(conv.name);
+        if (i > -1) current.splice(i, 1);
+      }
+      saveAllowedConvs(current);
+    };
+
+    const lbl = el('label', { className: 'mai-conv-label' }, conv.name);
+    lbl.setAttribute('for', cbId);
+
+    container.appendChild(el('div', { className: 'mai-conv-item' }, checkbox, lbl));
+  });
+}
+
 // ─── DOM helpers for Google Messages ────────────────────────────────────────
 
 function readMessages() {
@@ -289,6 +383,15 @@ async function onGenerate() {
       systemPrompt = BEHAVIORS[behaviorKey].system;
     }
 
+    // Check allowed conversations (empty list = all allowed)
+    const allowed = getAllowedConvs();
+    const contact = getContactName();
+    if (allowed.length > 0 && !allowed.includes(contact)) {
+      setStatus(`"${contact}" is not in your allowed list`, 'warn');
+      if (preview) preview.textContent = `This conversation ("${contact}") is not enabled. Check it in the Allowed Conversations list.`;
+      return;
+    }
+
     setStatus('Connecting to Ollama…');
     log('info', `Using model: ${model}`);
 
@@ -299,7 +402,6 @@ async function onGenerate() {
       return;
     }
 
-    const contact = getContactName();
     const recent  = messages.slice(-12);
     const context = recent.map(m => `${m.fromMe ? 'Me' : contact}: ${m.text}`).join('\n');
 
@@ -417,8 +519,38 @@ function buildPanel() {
     el('div',  { className: 'mai-header-btns' }, minBtn, closeBtn)
   );
 
+  // ── Conversation filter ──
+  const convList = el('div', { id: 'mai-conv-list', className: 'mai-conv-list' });
+  const refreshConvBtn  = el('button', { className: 'mai-btn-sm' }, '↺ Refresh');
+  const selectAllConvBtn = el('button', { className: 'mai-btn-sm' }, 'All');
+  const clearAllConvBtn  = el('button', { className: 'mai-btn-sm' }, 'None');
+
+  refreshConvBtn.onclick  = refreshConvList;
+  selectAllConvBtn.onclick = () => {
+    document.querySelectorAll('.mai-conv-checkbox').forEach(cb => {
+      cb.checked = true; cb.dispatchEvent(new Event('change'));
+    });
+  };
+  clearAllConvBtn.onclick = () => {
+    document.querySelectorAll('.mai-conv-checkbox').forEach(cb => {
+      cb.checked = false; cb.dispatchEvent(new Event('change'));
+    });
+    saveAllowedConvs([]);
+  };
+
+  const convHint = el('span', { className: 'mai-hint' }, ' (empty = all)');
+  const convLbl  = el('label', { className: 'mai-label' }, 'Allowed Conversations');
+  convLbl.appendChild(convHint);
+
+  const convSection = el('div', { className: 'mai-field' },
+    convLbl,
+    convList,
+    el('div', { className: 'mai-conv-btns' }, selectAllConvBtn, clearAllConvBtn, refreshConvBtn)
+  );
+
   // ── Body ──
   const body = el('div', { id: 'mai-body', className: 'mai-body' },
+    convSection,
     el('div', { className: 'mai-field' }, el('label', { className: 'mai-label' }, 'Response Style'), behaviorSel),
     el('div', { className: 'mai-field' }, el('label', { className: 'mai-label' }, 'Ollama Model'), modelInput),
     el('div', { className: 'mai-field' }, labelWithHint('Extra instructions ', '(optional)'), customPrompt),
@@ -480,6 +612,9 @@ function buildPanel() {
     localStorage.setItem('mai_customSystemPrompt', e.target.value);
     window.dispatchEvent(new CustomEvent('mai-save-setting', { detail: { key: 'customSystemPrompt', value: e.target.value } }));
   };
+
+  // ── Populate conversation list ──
+  setTimeout(refreshConvList, 300);
 
   // ── Check Ollama on open ──
   checkOllamaStatus().then(result => {
