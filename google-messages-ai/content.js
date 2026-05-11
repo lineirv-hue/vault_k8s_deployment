@@ -116,6 +116,23 @@ function refreshDebugUI() {
 
 // ─── Chrome AI ──────────────────────────────────────────────────────────────
 
+function dumpAIShape() {
+  if (!window.ai) return { ai: 'undefined' };
+  const shape = { aiKeys: Object.keys(window.ai) };
+  if (window.ai.languageModel) {
+    try { shape.languageModelKeys = Object.keys(window.ai.languageModel); } catch (_) {}
+    shape.languageModelType = typeof window.ai.languageModel;
+  }
+  // Also probe top-level ai object type
+  shape.aiType = typeof window.ai;
+  shape.hasCreate        = typeof window.ai.languageModel?.create === 'function';
+  shape.hasCapabilities  = typeof window.ai.languageModel?.capabilities === 'function';
+  shape.hasAvailability  = typeof window.ai.languageModel?.availability === 'function';
+  shape.hasCreateText    = typeof window.ai.createTextSession === 'function';
+  shape.hasCreateGeneric = typeof window.ai.createGenericSession === 'function';
+  return shape;
+}
+
 async function checkAIAvailability() {
   log('info', 'Checking Chrome AI availability…');
 
@@ -126,25 +143,41 @@ async function checkAIAvailability() {
     return 'unavailable';
   }
 
-  const api = window.ai.languageModel ?? window.ai;
+  const shape = dumpAIShape();
+  log('info', 'window.ai structure', shape);
 
-  if (typeof api.availability === 'function') {
+  const lm = window.ai.languageModel;
+
+  // Modern API: languageModel.availability()
+  if (typeof lm?.availability === 'function') {
     try {
-      const status = await api.availability();
+      const status = await lm.availability();
       log('info', `AI availability: ${status}`);
       return status;
     } catch (e) {
-      log('warn', 'availability() threw, assuming ready', { err: e.message });
-      return 'readily';
+      log('warn', 'availability() threw', { err: e.message });
     }
   }
 
-  if (typeof (window.ai.createTextSession ?? window.ai.createGenericSession) === 'function') {
-    log('info', 'Using legacy window.ai API');
+  // Also try languageModel.capabilities() used in some Chrome builds
+  if (typeof lm?.capabilities === 'function') {
+    try {
+      const caps = await lm.capabilities();
+      log('info', 'capabilities()', caps);
+      return caps?.available ?? 'readily';
+    } catch (e) {
+      log('warn', 'capabilities() threw', { err: e.message });
+    }
+  }
+
+  // Legacy: window.ai.createTextSession / createGenericSession
+  if (typeof window.ai.createTextSession === 'function' ||
+      typeof window.ai.createGenericSession === 'function') {
+    log('info', 'Using legacy window.ai session API');
     return 'readily';
   }
 
-  log('error', 'No recognized Chrome AI API found');
+  log('error', 'No recognized Chrome AI API found', shape);
   return 'unavailable';
 }
 
@@ -156,24 +189,39 @@ async function buildSession(systemPrompt) {
     aiSession = null;
   }
 
-  if (window.ai?.languageModel?.create) {
-    aiSession = await window.ai.languageModel.create({ systemPrompt });
-    log('info', 'Session created (languageModel)', {
-      maxTokens: aiSession.maxTokens,
-      temperature: aiSession.temperature,
-      topK: aiSession.topK
-    });
-    return;
+  const lm = window.ai?.languageModel;
+
+  // Try every known create-style method
+  const candidates = [
+    () => lm?.create?.({ systemPrompt }),
+    () => lm?.create?.({ systemPrompt, temperature: 0.8, topK: 3 }),
+    () => window.ai?.createTextSession?.({ systemPrompt }),
+    () => window.ai?.createGenericSession?.({ systemPrompt }),
+    // Some builds use create() without options then set prompt via prepend
+    () => lm?.create?.(),
+  ];
+
+  let lastErr;
+  for (const fn of candidates) {
+    try {
+      const session = await fn();
+      if (session) {
+        aiSession = session;
+        log('info', 'Session created', {
+          method: fn.toString().slice(6, 40),
+          maxTokens: session.maxTokens,
+          temperature: session.temperature,
+          topK: session.topK
+        });
+        return;
+      }
+    } catch (e) {
+      lastErr = e;
+      log('warn', `Candidate failed: ${e.message}`);
+    }
   }
 
-  const createFn = window.ai?.createTextSession ?? window.ai?.createGenericSession;
-  if (createFn) {
-    aiSession = await createFn.call(window.ai, { systemPrompt });
-    log('info', 'Session created (legacy API)');
-    return;
-  }
-
-  throw new Error('No Chrome AI session creator found');
+  throw new Error(`No Chrome AI session creator found. Last error: ${lastErr?.message}. Shape: ${JSON.stringify(dumpAIShape())}`);
 }
 
 async function streamPrompt(prompt, onChunk) {
