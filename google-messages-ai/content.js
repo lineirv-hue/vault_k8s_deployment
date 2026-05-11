@@ -303,28 +303,67 @@ function readMessages() {
 }
 
 function getContactName() {
-  // Try specific conversation-header selectors — avoid generic h2 which
-  // can match the sidebar "Conversations list" heading
-  const selectors = [
-    'mws-conversation-header .contact-name',
-    'mws-conversation-header [data-e2e-conversation-name]',
-    'mws-conversation-header h2',
-    'mws-toolbar .toolbar-title',
-    '.conversation-header-title',
-    '[data-e2e-conversation-name]',
-    '.contact-name'
-  ];
-  for (const sel of selectors) {
-    const name = document.querySelector(sel)?.textContent?.trim();
-    // Reject generic nav headings
-    if (name && name.length < 80 && !/(conversations list|messages)/i.test(name)) return name;
+  // Strategy 1: match the URL conversation ID to a sidebar item and read
+  // the name from the same source as the checklist — guaranteed to match.
+  const urlMatch = location.href.match(/conversations\/([^/?#]+)/);
+  if (urlMatch) {
+    const urlId = urlMatch[1];
+    const sidebarItems = document.querySelectorAll(
+      'mws-conversation-list-item, [data-e2e-conversation-id], .conv-container'
+    );
+    for (const item of sidebarItems) {
+      const itemId = item.getAttribute('data-e2e-conversation-id')
+        ?? item.getAttribute('data-conversation-id');
+      if (itemId === urlId) {
+        const nameSelectors = ['.contact-name', 'h3', '[data-e2e-conversation-name]', '.name', 'span'];
+        for (const sel of nameSelectors) {
+          const name = item.querySelector(sel)?.textContent?.trim();
+          if (name && name.length > 0 && name.length < 80) {
+            log('info', `Contact name from sidebar match: "${name}"`);
+            return name;
+          }
+        }
+      }
+    }
   }
 
-  // Last resort: try to extract from the page URL
-  const m = location.href.match(/conversations\/([^/?]+)/);
-  if (m) return decodeURIComponent(m[1]);
+  // Strategy 2: look for the visually active sidebar item
+  const activeSelectors = [
+    'mws-conversation-list-item[aria-selected="true"]',
+    'mws-conversation-list-item.active',
+    '[data-e2e-conversation-id][aria-selected="true"]'
+  ];
+  for (const sel of activeSelectors) {
+    const item = document.querySelector(sel);
+    if (item) {
+      const nameSelectors = ['.contact-name', 'h3', '[data-e2e-conversation-name]', '.name', 'span'];
+      for (const ns of nameSelectors) {
+        const name = item.querySelector(ns)?.textContent?.trim();
+        if (name && name.length > 0 && name.length < 80) {
+          log('info', `Contact name from active sidebar item: "${name}"`);
+          return name;
+        }
+      }
+    }
+  }
 
-  return null; // null = unknown, will trigger block below
+  // Strategy 3: conversation header (specific selectors only)
+  const headerSelectors = [
+    'mws-conversation-header .contact-name',
+    'mws-conversation-header [data-e2e-conversation-name]',
+    'mws-toolbar .toolbar-title',
+    '.conversation-header-title'
+  ];
+  for (const sel of headerSelectors) {
+    const name = document.querySelector(sel)?.textContent?.trim();
+    if (name && name.length < 80 && !/(conversations list|messages)/i.test(name)) {
+      log('info', `Contact name from header: "${name}"`);
+      return name;
+    }
+  }
+
+  log('warn', 'Could not determine contact name', { href: location.href });
+  return null;
 }
 
 function insertIntoCompose(text) {
