@@ -42,11 +42,11 @@ Write ONLY the reply text. No quotes, labels, or explanations.`
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
-let aiSession = null;
-let debugLogs = [];
-let panelOpen = false;
+let debugLogs  = [];
+let panelOpen  = false;
+let activePort = null;
 
-// ─── DOM helper (no innerHTML — required by Trusted Types) ──────────────────
+// ─── DOM helper (no innerHTML — Trusted Types safe) ─────────────────────────
 
 function el(tag, props, ...children) {
   const node = document.createElement(tag);
@@ -63,10 +63,9 @@ function el(tag, props, ...children) {
         case 'rows':            node.rows = v; break;
         case 'placeholder':     node.placeholder = v; break;
         case 'contentEditable': node.contentEditable = v; break;
-        case 'style':
-          Object.assign(node.style, v); break;
-        default:
-          node.setAttribute(k, v);
+        case 'value':           node.value = v; break;
+        case 'style':           Object.assign(node.style, v); break;
+        default:                node.setAttribute(k, v);
       }
     }
   }
@@ -91,15 +90,12 @@ function log(level, msg, data) {
 function refreshDebugUI() {
   const container = document.getElementById('mai-debug-content');
   if (!container) return;
-
   container.textContent = '';
-
   const entries = debugLogs.slice().reverse().slice(0, 50);
   if (!entries.length) {
     container.appendChild(el('div', { style: { color: '#858585' } }, 'No logs yet.'));
     return;
   }
-
   for (const e of entries) {
     const color = e.level === 'error' ? '#ff6b6b' : e.level === 'warn' ? '#ffd93d' : '#6bcb77';
     const row = el('div', { className: 'mai-log-row' },
@@ -114,136 +110,54 @@ function refreshDebugUI() {
   }
 }
 
-// ─── Chrome AI ──────────────────────────────────────────────────────────────
+// ─── Ollama via background port ──────────────────────────────────────────────
 
-function dumpAIShape() {
-  if (!window.ai) return { ai: 'undefined' };
-  const shape = { aiKeys: Object.keys(window.ai) };
-  if (window.ai.languageModel) {
-    try { shape.languageModelKeys = Object.keys(window.ai.languageModel); } catch (_) {}
-    shape.languageModelType = typeof window.ai.languageModel;
-  }
-  // Also probe top-level ai object type
-  shape.aiType = typeof window.ai;
-  shape.hasCreate        = typeof window.ai.languageModel?.create === 'function';
-  shape.hasCapabilities  = typeof window.ai.languageModel?.capabilities === 'function';
-  shape.hasAvailability  = typeof window.ai.languageModel?.availability === 'function';
-  shape.hasCreateText    = typeof window.ai.createTextSession === 'function';
-  shape.hasCreateGeneric = typeof window.ai.createGenericSession === 'function';
-  return shape;
-}
+function generateWithOllama(systemPrompt, prompt, model, onChunk) {
+  return new Promise((resolve, reject) => {
+    if (activePort) { try { activePort.disconnect(); } catch (_) {} }
 
-async function checkAIAvailability() {
-  log('info', 'Checking Chrome AI availability…');
+    const port = chrome.runtime.connect({ name: 'mai-generate' });
+    activePort = port;
 
-  if (!window.ai) {
-    log('error', 'window.ai not found', {
-      fix: 'Enable chrome://flags/#prompt-api-for-gemini-nano and chrome://flags/#optimization-guide-on-device-model'
-    });
-    return 'unavailable';
-  }
-
-  const shape = dumpAIShape();
-  log('info', 'window.ai structure', shape);
-
-  const lm = window.ai.languageModel;
-
-  // Modern API: languageModel.availability()
-  if (typeof lm?.availability === 'function') {
-    try {
-      const status = await lm.availability();
-      log('info', `AI availability: ${status}`);
-      return status;
-    } catch (e) {
-      log('warn', 'availability() threw', { err: e.message });
-    }
-  }
-
-  // Also try languageModel.capabilities() used in some Chrome builds
-  if (typeof lm?.capabilities === 'function') {
-    try {
-      const caps = await lm.capabilities();
-      log('info', 'capabilities()', caps);
-      return caps?.available ?? 'readily';
-    } catch (e) {
-      log('warn', 'capabilities() threw', { err: e.message });
-    }
-  }
-
-  // Legacy: window.ai.createTextSession / createGenericSession
-  if (typeof window.ai.createTextSession === 'function' ||
-      typeof window.ai.createGenericSession === 'function') {
-    log('info', 'Using legacy window.ai session API');
-    return 'readily';
-  }
-
-  log('error', 'No recognized Chrome AI API found', shape);
-  return 'unavailable';
-}
-
-async function buildSession(systemPrompt) {
-  log('info', 'Creating AI session…');
-
-  if (aiSession) {
-    try { aiSession.destroy(); } catch (_) {}
-    aiSession = null;
-  }
-
-  const lm = window.ai?.languageModel;
-
-  // Try every known create-style method
-  const candidates = [
-    () => lm?.create?.({ systemPrompt }),
-    () => lm?.create?.({ systemPrompt, temperature: 0.8, topK: 3 }),
-    () => window.ai?.createTextSession?.({ systemPrompt }),
-    () => window.ai?.createGenericSession?.({ systemPrompt }),
-    // Some builds use create() without options then set prompt via prepend
-    () => lm?.create?.(),
-  ];
-
-  let lastErr;
-  for (const fn of candidates) {
-    try {
-      const session = await fn();
-      if (session) {
-        aiSession = session;
-        log('info', 'Session created', {
-          method: fn.toString().slice(6, 40),
-          maxTokens: session.maxTokens,
-          temperature: session.temperature,
-          topK: session.topK
-        });
-        return;
+    port.onMessage.addListener(msg => {
+      if (msg.type === 'chunk') {
+        onChunk(msg.text);
+      } else if (msg.type === 'done') {
+        onChunk(msg.text);
+        activePort = null;
+        resolve(msg.text);
+      } else if (msg.type === 'error') {
+        activePort = null;
+        reject(new Error(msg.message));
       }
-    } catch (e) {
-      lastErr = e;
-      log('warn', `Candidate failed: ${e.message}`);
-    }
-  }
+    });
 
-  throw new Error(`No Chrome AI session creator found. Last error: ${lastErr?.message}. Shape: ${JSON.stringify(dumpAIShape())}`);
+    port.onDisconnect.addListener(() => {
+      activePort = null;
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message));
+    });
+
+    port.postMessage({ systemPrompt, prompt, model });
+  });
 }
 
-async function streamPrompt(prompt, onChunk) {
-  if (typeof aiSession.promptStreaming === 'function') {
-    const stream = await aiSession.promptStreaming(prompt);
-    let last = '';
-    for await (const chunk of stream) {
-      last = chunk;
-      onChunk(last);
-    }
-    return last;
-  }
-  const result = await aiSession.prompt(prompt);
-  onChunk(result);
-  return result;
+function checkOllamaStatus() {
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'ollama-check' }, response => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+      } else {
+        resolve(response);
+      }
+    });
+  });
 }
 
 // ─── DOM helpers for Google Messages ────────────────────────────────────────
 
 function readMessages() {
   log('info', 'Reading conversation messages…');
-
   const selectors = [
     'mws-message-part-content',
     'mws-text-message-part',
@@ -251,15 +165,11 @@ function readMessages() {
     '.message-wrapper',
     '.msg-container'
   ];
-
-  let elements = null;
-  let usedSelector = null;
-
+  let elements = null, usedSelector = null;
   for (const sel of selectors) {
     const found = document.querySelectorAll(sel);
     if (found.length > 0) { elements = found; usedSelector = sel; break; }
   }
-
   if (!elements) {
     log('warn', 'Precise selectors found nothing — trying broad fallback');
     const container = document.querySelector('mws-messages-list, .messages-container, main');
@@ -275,14 +185,11 @@ function readMessages() {
     log('error', 'Could not read messages — DOM structure unrecognized');
     return [];
   }
-
   log('info', `Using selector: ${usedSelector}`, { count: elements.length });
-
   const messages = [];
   elements.forEach(node => {
     const text = node.textContent?.trim();
     if (!text) return;
-
     let fromMe = false;
     const ancestor = node.closest('[data-e2e-is-from-me]');
     if (ancestor) {
@@ -294,7 +201,6 @@ function readMessages() {
     }
     messages.push({ text, fromMe });
   });
-
   log('info', `Parsed ${messages.length} messages`, {
     fromMe: messages.filter(m => m.fromMe).length,
     fromThem: messages.filter(m => !m.fromMe).length
@@ -303,16 +209,9 @@ function readMessages() {
 }
 
 function getContactName() {
-  const selectors = [
-    'mws-conversation-header h2',
-    '[data-e2e-conversation-name]',
-    '.contact-name',
-    'h2',
-    'mws-conversation-header'
-  ];
+  const selectors = ['mws-conversation-header h2', '[data-e2e-conversation-name]', '.contact-name', 'h2'];
   for (const sel of selectors) {
-    const node = document.querySelector(sel);
-    const name = node?.textContent?.trim();
+    const name = document.querySelector(sel)?.textContent?.trim();
     if (name && name.length < 80) return name;
   }
   return 'them';
@@ -320,43 +219,36 @@ function getContactName() {
 
 function insertIntoCompose(text) {
   log('info', 'Inserting text into compose box…');
-
   const selectors = [
     'mws-compose-bar textarea',
     'mws-compose-bar [contenteditable="true"]',
     '[data-e2e-compose-input]',
     'textarea[placeholder*="message" i]',
-    'div[contenteditable="true"][class*="compose" i]',
     'div[contenteditable="true"]',
     'textarea'
   ];
-
   let box = null, usedSel = null;
   for (const sel of selectors) {
     const found = document.querySelector(sel);
     if (found) { box = found; usedSel = sel; break; }
   }
-
   if (!box) {
     log('error', 'Compose box not found', { tried: selectors });
     return false;
   }
-
   log('info', `Found compose box: ${usedSel}`);
   box.focus();
-
   if (box.tagName === 'TEXTAREA' || box.tagName === 'INPUT') {
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
       ?? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     if (setter) setter.call(box, text); else box.value = text;
-    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('input',  { bubbles: true }));
     box.dispatchEvent(new Event('change', { bubbles: true }));
   } else {
     box.textContent = '';
     document.execCommand('insertText', false, text);
     box.dispatchEvent(new Event('input', { bubbles: true }));
   }
-
   log('info', 'Text inserted successfully');
   return true;
 }
@@ -375,17 +267,18 @@ function getPreviewText() {
 }
 
 async function onGenerate() {
-  const genBtn = document.getElementById('mai-generate-btn');
+  const genBtn  = document.getElementById('mai-generate-btn');
   const sendBtn = document.getElementById('mai-send-btn');
   const preview = document.getElementById('mai-preview');
 
   genBtn.disabled = true;
-  if (preview) preview.textContent = '…thinking';
-  if (sendBtn) sendBtn.disabled = true;
+  if (preview)  preview.textContent  = '…thinking';
+  if (sendBtn)  sendBtn.disabled = true;
 
   try {
-    const behaviorKey = document.getElementById('mai-behavior-select')?.value ?? 'kind';
-    const customText = document.getElementById('mai-custom-prompt')?.value?.trim() ?? '';
+    const behaviorKey  = document.getElementById('mai-behavior-select')?.value ?? 'kind';
+    const customText   = document.getElementById('mai-custom-prompt')?.value?.trim() ?? '';
+    const model        = localStorage.getItem('mai_ollamaModel') || 'llama3.2';
 
     let systemPrompt;
     if (behaviorKey === 'custom' && customText) {
@@ -396,8 +289,8 @@ async function onGenerate() {
       systemPrompt = BEHAVIORS[behaviorKey].system;
     }
 
-    setStatus('Initializing AI…');
-    await buildSession(systemPrompt);
+    setStatus('Connecting to Ollama…');
+    log('info', `Using model: ${model}`);
 
     const messages = readMessages();
     if (messages.length === 0) {
@@ -407,7 +300,7 @@ async function onGenerate() {
     }
 
     const contact = getContactName();
-    const recent = messages.slice(-12);
+    const recent  = messages.slice(-12);
     const context = recent.map(m => `${m.fromMe ? 'Me' : contact}: ${m.text}`).join('\n');
 
     log('info', 'Building prompt…', { contact, contextLines: recent.length });
@@ -415,7 +308,7 @@ async function onGenerate() {
     const prompt = `Conversation with ${contact}:\n\n${context}\n\nWrite my next reply to ${contact}'s last message.`;
     setStatus('Generating…');
 
-    await streamPrompt(prompt, chunk => {
+    await generateWithOllama(systemPrompt, prompt, model, chunk => {
       if (preview) preview.textContent = chunk;
     });
 
@@ -423,7 +316,7 @@ async function onGenerate() {
     if (sendBtn) sendBtn.disabled = false;
 
   } catch (err) {
-    log('error', 'Generation failed', { message: err.message, stack: err.stack });
+    log('error', 'Generation failed', { message: err.message });
     setStatus(`Error: ${err.message}`, 'error');
     if (preview) preview.textContent = `Error: ${err.message}`;
   } finally {
@@ -433,14 +326,13 @@ async function onGenerate() {
 
 function onInsert() {
   const text = getPreviewText();
-  const placeholder = 'Click "Generate" to create a reply…';
-  if (!text || text === placeholder) {
+  if (!text || text === 'Click "Generate" to create a reply…') {
     setStatus('Nothing to insert — generate a response first', 'warn');
     return;
   }
   const ok = insertIntoCompose(text);
   if (ok) setStatus('Inserted into compose box!', 'success');
-  else setStatus('Could not find compose box — see debug log', 'error');
+  else    setStatus('Could not find compose box — see debug log', 'error');
 }
 
 function makeDraggable(panel, handle) {
@@ -448,16 +340,15 @@ function makeDraggable(panel, handle) {
   handle.addEventListener('mousedown', e => {
     dragging = true;
     const r = panel.getBoundingClientRect();
-    ox = e.clientX - r.left;
-    oy = e.clientY - r.top;
+    ox = e.clientX - r.left; oy = e.clientY - r.top;
     handle.style.cursor = 'grabbing';
     e.preventDefault();
   });
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
-    panel.style.left = `${Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, e.clientX - ox))}px`;
-    panel.style.top = `${Math.max(0, Math.min(window.innerHeight - 60, e.clientY - oy))}px`;
-    panel.style.right = 'auto';
+    panel.style.left   = `${Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  e.clientX - ox))}px`;
+    panel.style.top    = `${Math.max(0, Math.min(window.innerHeight - 60, e.clientY - oy))}px`;
+    panel.style.right  = 'auto';
     panel.style.bottom = 'auto';
   });
   document.addEventListener('mouseup', () => { dragging = false; handle.style.cursor = 'grab'; });
@@ -471,34 +362,35 @@ function labelWithHint(text, hint) {
 
 function buildPanel() {
   console.log('[MsgAI] buildPanel() called');
-  const old = document.getElementById('mai-panel');
-  if (old) old.remove();
-
-  if (!document.body) {
-    console.error('[MsgAI] buildPanel: document.body is null');
-    return;
-  }
+  document.getElementById('mai-panel')?.remove();
+  if (!document.body) { console.error('[MsgAI] buildPanel: no body'); return; }
 
   // ── Behavior select ──
   const behaviorSel = el('select', { id: 'mai-behavior-select', className: 'mai-select' });
   for (const [k, v] of Object.entries(BEHAVIORS)) {
     const opt = document.createElement('option');
-    opt.value = k;
-    opt.textContent = v.label;
+    opt.value = k; opt.textContent = v.label;
     behaviorSel.appendChild(opt);
   }
 
+  // ── Model input ──
+  const modelInput = el('input', {
+    id: 'mai-model-input',
+    className: 'mai-textarea',
+    placeholder: 'e.g. llama3.2, mistral, gemma2…',
+    value: localStorage.getItem('mai_ollamaModel') || 'llama3.2'
+  });
+  modelInput.type = 'text';
+
   // ── Custom prompt ──
   const customPrompt = el('textarea', {
-    id: 'mai-custom-prompt',
-    className: 'mai-textarea',
-    rows: 2,
+    id: 'mai-custom-prompt', className: 'mai-textarea', rows: 2,
     placeholder: 'e.g. Always end with a question, keep it under 20 words…'
   });
 
   // ── Buttons ──
   const generateBtn = el('button', { id: 'mai-generate-btn', className: 'mai-btn mai-btn-primary' }, '✨ Generate Response');
-  const sendBtn     = el('button', { id: 'mai-send-btn',     className: 'mai-btn mai-btn-success',    disabled: true }, '📤 Insert into Chat');
+  const sendBtn     = el('button', { id: 'mai-send-btn',     className: 'mai-btn mai-btn-success',  disabled: true }, '📤 Insert into Chat');
   const regenBtn    = el('button', { id: 'mai-regen-btn',    className: 'mai-btn mai-btn-secondary' }, '🔄 Regenerate');
 
   // ── Preview ──
@@ -506,31 +398,29 @@ function buildPanel() {
     'Click "Generate" to create a reply…');
 
   // ── Status ──
-  const status = el('div', { id: 'mai-status', className: 'mai-status' }, 'Ready');
+  const status = el('div', { id: 'mai-status', className: 'mai-status' }, 'Checking Ollama…');
 
   // ── Debug ──
   const debugContent = el('div', { id: 'mai-debug-content', className: 'mai-debug-content' });
   const debugClearBtn = el('button', { id: 'mai-debug-clear', className: 'mai-btn-tiny' }, 'Clear');
-  const debugBar = el('div', { className: 'mai-debug-bar' },
-    el('span', null, 'Debug Output'),
-    debugClearBtn
-  );
   const debugPanel = el('div', { id: 'mai-debug-panel', className: 'mai-debug-panel', hidden: true },
-    debugBar, debugContent
+    el('div', { className: 'mai-debug-bar' }, el('span', null, 'Debug Output'), debugClearBtn),
+    debugContent
   );
   const debugToggle = el('button', { id: 'mai-debug-toggle', className: 'mai-btn mai-btn-ghost' }, '🔍 Debug Log ▼');
 
   // ── Header ──
   const minBtn   = el('button', { id: 'mai-minimize-btn', className: 'mai-icon-btn', title: 'Minimize' }, '−');
   const closeBtn = el('button', { id: 'mai-close-btn',   className: 'mai-icon-btn', title: 'Close'    }, '×');
-  const header = el('div', { id: 'mai-drag-handle', className: 'mai-header' },
+  const header   = el('div', { id: 'mai-drag-handle', className: 'mai-header' },
     el('span', { className: 'mai-title' }, '🤖 Messages AI'),
-    el('div', { className: 'mai-header-btns' }, minBtn, closeBtn)
+    el('div',  { className: 'mai-header-btns' }, minBtn, closeBtn)
   );
 
   // ── Body ──
   const body = el('div', { id: 'mai-body', className: 'mai-body' },
     el('div', { className: 'mai-field' }, el('label', { className: 'mai-label' }, 'Response Style'), behaviorSel),
+    el('div', { className: 'mai-field' }, el('label', { className: 'mai-label' }, 'Ollama Model'), modelInput),
     el('div', { className: 'mai-field' }, labelWithHint('Extra instructions ', '(optional)'), customPrompt),
     generateBtn,
     el('div', { className: 'mai-field' }, labelWithHint('Preview ', '(editable)'), preview),
@@ -545,41 +435,41 @@ function buildPanel() {
 
   // ── Event wiring ──
   closeBtn.onclick = () => { panel.remove(); panelOpen = false; };
-
   minBtn.onclick = () => {
-    const minimized = body.style.display === 'none';
-    body.style.display = minimized ? '' : 'none';
-    minBtn.textContent = minimized ? '−' : '+';
+    const min = body.style.display === 'none';
+    body.style.display = min ? '' : 'none';
+    minBtn.textContent = min ? '−' : '+';
   };
-
   generateBtn.onclick = onGenerate;
-  sendBtn.onclick = onInsert;
-  regenBtn.onclick = onGenerate;
-
+  sendBtn.onclick     = onInsert;
+  regenBtn.onclick    = onGenerate;
   debugToggle.onclick = () => {
     debugPanel.hidden = !debugPanel.hidden;
     debugToggle.textContent = debugPanel.hidden ? '🔍 Debug Log ▼' : '🔍 Debug Log ▲';
     if (!debugPanel.hidden) refreshDebugUI();
   };
-
   debugClearBtn.onclick = () => { debugLogs = []; refreshDebugUI(); };
+
+  // ── Persist model choice ──
+  modelInput.onchange = e => {
+    const v = e.target.value.trim();
+    if (v) {
+      localStorage.setItem('mai_ollamaModel', v);
+      window.dispatchEvent(new CustomEvent('mai-save-setting', { detail: { key: 'ollamaModel', value: v } }));
+    }
+  };
 
   // ── Load saved settings ──
   const savedBehavior = localStorage.getItem('mai_behavior');
   const savedPrompt   = localStorage.getItem('mai_customSystemPrompt');
-  if (savedBehavior) behaviorSel.value = savedBehavior;
-  if (savedPrompt)   customPrompt.value = savedPrompt;
+  if (savedBehavior) behaviorSel.value   = savedBehavior;
+  if (savedPrompt)   customPrompt.value  = savedPrompt;
 
   window.addEventListener('mai-storage-push', e => {
-    const { behavior, customSystemPrompt } = e.detail ?? {};
-    if (behavior) {
-      localStorage.setItem('mai_behavior', behavior);
-      behaviorSel.value = behavior;
-    }
-    if (customSystemPrompt !== undefined) {
-      localStorage.setItem('mai_customSystemPrompt', customSystemPrompt);
-      customPrompt.value = customSystemPrompt;
-    }
+    const d = e.detail ?? {};
+    if (d.behavior)            { localStorage.setItem('mai_behavior',           d.behavior);            behaviorSel.value  = d.behavior; }
+    if (d.customSystemPrompt)  { localStorage.setItem('mai_customSystemPrompt', d.customSystemPrompt);  customPrompt.value = d.customSystemPrompt; }
+    if (d.ollamaModel)         { localStorage.setItem('mai_ollamaModel',        d.ollamaModel);         modelInput.value   = d.ollamaModel; }
   });
 
   behaviorSel.onchange = e => {
@@ -591,22 +481,15 @@ function buildPanel() {
     window.dispatchEvent(new CustomEvent('mai-save-setting', { detail: { key: 'customSystemPrompt', value: e.target.value } }));
   };
 
-  // ── Probe AI ──
-  checkAIAvailability().then(s => {
-    if (s === 'readily') {
-      setStatus('Chrome AI ready', 'success');
-      log('info', '✅ Chrome built-in AI is ready');
-    } else if (s === 'after-download') {
-      setStatus('AI model downloading — please wait…', 'warn');
-      log('warn', 'Model needs to download. Try generating in a moment.');
+  // ── Check Ollama on open ──
+  checkOllamaStatus().then(result => {
+    if (result.ok) {
+      const modelList = result.models?.join(', ') || '(none pulled yet)';
+      setStatus(`Ollama ready ✅  |  models: ${modelList}`, 'success');
+      log('info', 'Ollama is running', { models: result.models });
     } else {
-      setStatus('Chrome AI unavailable — see debug log', 'error');
-      log('error', 'Chrome AI not available', {
-        step1: 'chrome://flags/#prompt-api-for-gemini-nano → Enabled',
-        step2: 'chrome://flags/#optimization-guide-on-device-model → Enabled BypassPerfRequirement',
-        step3: 'chrome://components → update Optimization Guide On Device Model',
-        step4: 'Restart Chrome'
-      });
+      setStatus('Ollama not reachable — run: ollama serve', 'error');
+      log('error', 'Ollama unreachable', { error: result.error });
     }
   });
 
@@ -617,22 +500,15 @@ function buildPanel() {
 
 function buildFAB() {
   if (document.getElementById('mai-fab')) return;
-
   const target = document.body ?? document.documentElement;
   if (!target) { console.warn('[MsgAI] No mount target yet, will retry…'); return; }
 
   const fab = el('button', { id: 'mai-fab', className: 'mai-fab', title: 'Open Messages AI Assistant' }, '🤖');
   fab.onclick = () => {
     try {
-      if (panelOpen) {
-        document.getElementById('mai-panel')?.remove();
-        panelOpen = false;
-      } else {
-        buildPanel();
-      }
-    } catch (e) {
-      console.error('[MsgAI] FAB click error:', e);
-    }
+      if (panelOpen) { document.getElementById('mai-panel')?.remove(); panelOpen = false; }
+      else buildPanel();
+    } catch (e) { console.error('[MsgAI] FAB click error:', e); }
   };
   target.appendChild(fab);
   console.log('[MsgAI] ✅ FAB mounted — click 🤖 to open');
@@ -648,11 +524,7 @@ setInterval(() => { if (!document.getElementById('mai-fab')) tryInit(); }, 1500)
 
 let lastHref = location.href;
 new MutationObserver(() => {
-  if (location.href !== lastHref) {
-    lastHref = location.href;
-    console.log('[MsgAI] Navigation:', lastHref);
-    tryInit();
-  }
+  if (location.href !== lastHref) { lastHref = location.href; tryInit(); }
 }).observe(document, { subtree: true, childList: true });
 
 tryInit();

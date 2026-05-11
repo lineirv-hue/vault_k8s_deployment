@@ -2,7 +2,7 @@
 // Runs in ISOLATED world — has chrome.* APIs but no window.ai.
 // Bridges chrome.storage.sync <-> localStorage so the MAIN world script can read settings.
 
-const KEYS = ['behavior', 'customSystemPrompt'];
+const KEYS = ['behavior', 'customSystemPrompt', 'ollamaModel'];
 
 function pushToLocalStorage(items) {
   // Communicate to MAIN world via a CustomEvent on the shared DOM
