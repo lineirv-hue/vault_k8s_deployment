@@ -303,12 +303,28 @@ function readMessages() {
 }
 
 function getContactName() {
-  const selectors = ['mws-conversation-header h2', '[data-e2e-conversation-name]', '.contact-name', 'h2'];
+  // Try specific conversation-header selectors — avoid generic h2 which
+  // can match the sidebar "Conversations list" heading
+  const selectors = [
+    'mws-conversation-header .contact-name',
+    'mws-conversation-header [data-e2e-conversation-name]',
+    'mws-conversation-header h2',
+    'mws-toolbar .toolbar-title',
+    '.conversation-header-title',
+    '[data-e2e-conversation-name]',
+    '.contact-name'
+  ];
   for (const sel of selectors) {
     const name = document.querySelector(sel)?.textContent?.trim();
-    if (name && name.length < 80) return name;
+    // Reject generic nav headings
+    if (name && name.length < 80 && !/(conversations list|messages)/i.test(name)) return name;
   }
-  return 'them';
+
+  // Last resort: try to extract from the page URL
+  const m = location.href.match(/conversations\/([^/?]+)/);
+  if (m) return decodeURIComponent(m[1]);
+
+  return null; // null = unknown, will trigger block below
 }
 
 function insertIntoCompose(text) {
@@ -383,23 +399,37 @@ async function onGenerate() {
       systemPrompt = BEHAVIORS[behaviorKey].system;
     }
 
-    // Check allowed conversations (empty list = all allowed)
+    // Check allowed conversations
+    // Empty list = BLOCK ALL (user must explicitly check conversations to enable)
     const allowed = getAllowedConvs();
     const contact = getContactName();
     log('info', 'Conversation allowlist check', { contact, allowed });
 
-    if (allowed.length > 0) {
-      const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
-      const contactNorm = norm(contact);
-      const match = allowed.some(name => {
-        const n = norm(name);
-        return n === contactNorm || n.includes(contactNorm) || contactNorm.includes(n);
-      });
-      if (!match) {
-        setStatus(`"${contact}" is not in your allowed list`, 'warn');
-        if (preview) preview.textContent = `"${contact}" is not enabled.\n\nAllowed: ${allowed.join(', ')}\n\nOpen the debug log to see the exact name comparison.`;
-        return;
-      }
+    if (allowed.length === 0) {
+      setStatus('No conversations selected — check at least one above', 'warn');
+      if (preview) preview.textContent = 'No conversations are enabled.\n\nCheck the conversations you want to use AI for in the "Allowed Conversations" list above.';
+      return;
+    }
+
+    if (!contact) {
+      setStatus('Could not detect current conversation name', 'warn');
+      if (preview) preview.textContent = 'Could not read the contact name. Open the debug log for details.';
+      return;
+    }
+
+    const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+    const contactNorm = norm(contact);
+    const match = allowed.some(name => {
+      const n = norm(name);
+      return n === contactNorm || n.includes(contactNorm) || contactNorm.includes(n);
+    });
+
+    log('info', 'Name match result', { contactNorm, match, allowedNormed: allowed.map(norm) });
+
+    if (!match) {
+      setStatus(`"${contact}" is not in your allowed list`, 'warn');
+      if (preview) preview.textContent = `"${contact}" is not enabled.\n\nAllowed: ${allowed.join(', ')}`;
+      return;
     }
 
     setStatus('Connecting to Ollama…');
@@ -548,7 +578,7 @@ function buildPanel() {
     saveAllowedConvs([]);
   };
 
-  const convHint = el('span', { className: 'mai-hint' }, ' (empty = all)');
+  const convHint = el('span', { className: 'mai-hint' }, ' (must select to enable)');
   const convLbl  = el('label', { className: 'mai-label' }, 'Allowed Conversations');
   convLbl.appendChild(convHint);
 
