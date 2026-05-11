@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Messages AI Assistant</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 310px;
+      font-family: 'Google Sans', Roboto, Arial, sans-serif;
+      font-size: 13px;
+      color: #202124;
+      background: #fff;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px 12px;
+      background: #1a73e8;
+      color: #fff;
+    }
+    .header-icon { font-size: 22px; }
+    .header-title { font-size: 15px; font-weight: 600; }
+    .header-sub { font-size: 11px; opacity: 0.80; }
+
+    .section {
+      padding: 12px 16px;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    .section:last-child { border-bottom: none; }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #5f6368;
+      margin-bottom: 8px;
+    }
+
+    .ai-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #f1f3f4;
+      font-size: 12.5px;
+    }
+    .ai-status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #9aa0a6;
+      flex-shrink: 0;
+    }
+    .ai-status.ok    .ai-status-dot { background: #34a853; }
+    .ai-status.error .ai-status-dot { background: #ea4335; }
+    .ai-status.warn  .ai-status-dot { background: #fbbc04; }
+
+    select, textarea {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1.5px solid #dadce0;
+      border-radius: 7px;
+      font-size: 13px;
+      font-family: inherit;
+      color: #202124;
+      outline: none;
+    }
+    select:focus, textarea:focus { border-color: #1a73e8; }
+    select { appearance: none; cursor: pointer; }
+
+    .field { margin-bottom: 10px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 11.5px; color: #5f6368; margin-bottom: 4px; font-weight: 500; }
+
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #3c4043;
+    }
+    .steps li::before {
+      content: counter(step);
+      background: #1a73e8;
+      color: #fff;
+      border-radius: 50%;
+      min-width: 18px;
+      height: 18px;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+      flex-shrink: 0;
+    }
+
+    code {
+      background: #f1f3f4;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 10.5px;
+      font-family: 'Courier New', monospace;
+      color: #c5221f;
+    }
+
+    .open-btn {
+      display: block;
+      width: 100%;
+      padding: 9px 0;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    .open-btn:hover { background: #1558b0; }
+
+    .footer {
+      padding: 10px 16px;
+      font-size: 11px;
+      color: #9aa0a6;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-icon">🤖</div>
+    <div>
+      <div class="header-title">Messages AI Assistant</div>
+      <div class="header-sub">Powered by Chrome's built-in Gemini Nano</div>
+    </div>
+  </div>
+
+  <!-- AI Status -->
+  <div class="section">
+    <div class="section-title">Chrome AI Status</div>
+    <div class="ai-status" id="ai-status-box">
+      <div class="ai-status-dot"></div>
+      <span id="ai-status-text">Checking…</span>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="section">
+    <div class="section-title">Default Settings</div>
+    <div class="field">
+      <label>Default response style</label>
+      <select id="default-behavior">
+        <option value="kind">Kind &amp; Empathetic</option>
+        <option value="professional">Professional</option>
+        <option value="casual">Casual &amp; Friendly</option>
+        <option value="humorous">Humorous &amp; Witty</option>
+        <option value="brief">Brief &amp; Direct</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Open button -->
+  <div class="section">
+    <button class="open-btn" id="open-btn">Open on messages.google.com →</button>
+  </div>
+
+  <!-- Setup guide -->
+  <div class="section">
+    <div class="section-title">Setup — Enable Chrome AI</div>
+    <ol class="steps">
+      <li>Open <code>chrome://flags/#prompt-api-for-gemini-nano</code> → set <strong>Enabled</strong></li>
+      <li>Open <code>chrome://flags/#optimization-guide-on-device-model</code> → set <strong>Enabled BypassPerfRequirement</strong></li>
+      <li>Go to <code>chrome://components</code>, find <em>Optimization Guide On Device Model</em>, click <strong>Check for update</strong></li>
+      <li>Restart Chrome, then open Google Messages</li>
+    </ol>
+  </div>
+
+  <div class="footer">No remote AI calls — everything runs on-device.</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
