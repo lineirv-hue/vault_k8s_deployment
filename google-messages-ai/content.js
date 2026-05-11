@@ -36,7 +36,7 @@ Write ONLY the reply text. No quotes, labels, or explanations.`
   },
   custom: {
     label: 'Custom (see below)',
-    system: '' // filled from textarea
+    system: ''
   }
 };
 
@@ -46,44 +46,72 @@ let aiSession = null;
 let debugLogs = [];
 let panelOpen = false;
 
+// ─── DOM helper (no innerHTML — required by Trusted Types) ──────────────────
+
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  if (props) {
+    for (const [k, v] of Object.entries(props)) {
+      if (v == null) continue;
+      switch (k) {
+        case 'className':       node.className = v; break;
+        case 'id':              node.id = v; break;
+        case 'textContent':     node.textContent = v; break;
+        case 'title':           node.title = v; break;
+        case 'disabled':        node.disabled = v; break;
+        case 'hidden':          node.hidden = v; break;
+        case 'rows':            node.rows = v; break;
+        case 'placeholder':     node.placeholder = v; break;
+        case 'contentEditable': node.contentEditable = v; break;
+        case 'style':
+          Object.assign(node.style, v); break;
+        default:
+          node.setAttribute(k, v);
+      }
+    }
+  }
+  for (const child of children) {
+    if (child == null) continue;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
 // ─── Debug logging ──────────────────────────────────────────────────────────
 
 function log(level, msg, data) {
   const entry = { ts: new Date().toLocaleTimeString(), level, msg, data };
   debugLogs.push(entry);
   if (debugLogs.length > 200) debugLogs.shift();
-
   const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
   fn(`[MsgAI][${level}] ${msg}`, data ?? '');
-
   refreshDebugUI();
 }
 
 function refreshDebugUI() {
-  const el = document.getElementById('mai-debug-content');
-  if (!el) return;
+  const container = document.getElementById('mai-debug-content');
+  if (!container) return;
 
-  const rows = debugLogs.slice().reverse().slice(0, 50).map(e => {
+  container.textContent = '';
+
+  const entries = debugLogs.slice().reverse().slice(0, 50);
+  if (!entries.length) {
+    container.appendChild(el('div', { style: { color: '#858585' } }, 'No logs yet.'));
+    return;
+  }
+
+  for (const e of entries) {
     const color = e.level === 'error' ? '#ff6b6b' : e.level === 'warn' ? '#ffd93d' : '#6bcb77';
-    const dataStr = e.data != null
-      ? `<pre class="mai-log-data">${escHtml(JSON.stringify(e.data, null, 2))}</pre>`
-      : '';
-    return `<div class="mai-log-row">
-      <span class="mai-log-ts">${e.ts}</span>
-      <span class="mai-log-lvl" style="color:${color}">[${e.level.toUpperCase()}]</span>
-      <span class="mai-log-msg">${escHtml(e.msg)}</span>
-      ${dataStr}
-    </div>`;
-  });
-
-  el.innerHTML = rows.join('') || '<div style="color:#858585">No logs yet.</div>';
-}
-
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    const row = el('div', { className: 'mai-log-row' },
+      el('span', { className: 'mai-log-ts' }, e.ts),
+      el('span', { className: 'mai-log-lvl', style: { color } }, `[${e.level.toUpperCase()}]`),
+      el('span', { className: 'mai-log-msg' }, e.msg)
+    );
+    if (e.data != null) {
+      row.appendChild(el('pre', { className: 'mai-log-data' }, JSON.stringify(e.data, null, 2)));
+    }
+    container.appendChild(row);
+  }
 }
 
 // ─── Chrome AI ──────────────────────────────────────────────────────────────
@@ -104,14 +132,13 @@ async function checkAIAvailability() {
     try {
       const status = await api.availability();
       log('info', `AI availability: ${status}`);
-      return status; // 'readily' | 'after-download' | 'no'
+      return status;
     } catch (e) {
       log('warn', 'availability() threw, assuming ready', { err: e.message });
       return 'readily';
     }
   }
 
-  // Older Chrome versions expose createTextSession directly
   if (typeof (window.ai.createTextSession ?? window.ai.createGenericSession) === 'function') {
     log('info', 'Using legacy window.ai API');
     return 'readily';
@@ -129,7 +156,6 @@ async function buildSession(systemPrompt) {
     aiSession = null;
   }
 
-  // Modern API: window.ai.languageModel
   if (window.ai?.languageModel?.create) {
     aiSession = await window.ai.languageModel.create({ systemPrompt });
     log('info', 'Session created (languageModel)', {
@@ -140,7 +166,6 @@ async function buildSession(systemPrompt) {
     return;
   }
 
-  // Legacy API: window.ai.createTextSession
   const createFn = window.ai?.createTextSession ?? window.ai?.createGenericSession;
   if (createFn) {
     aiSession = await createFn.call(window.ai, { systemPrompt });
@@ -152,17 +177,15 @@ async function buildSession(systemPrompt) {
 }
 
 async function streamPrompt(prompt, onChunk) {
-  // Try streaming first
   if (typeof aiSession.promptStreaming === 'function') {
     const stream = await aiSession.promptStreaming(prompt);
     let last = '';
     for await (const chunk of stream) {
-      last = chunk; // cumulative chunks
+      last = chunk;
       onChunk(last);
     }
     return last;
   }
-  // Fall back to non-streaming
   const result = await aiSession.prompt(prompt);
   onChunk(result);
   return result;
@@ -173,7 +196,6 @@ async function streamPrompt(prompt, onChunk) {
 function readMessages() {
   log('info', 'Reading conversation messages…');
 
-  // Ordered from most specific to most general
   const selectors = [
     'mws-message-part-content',
     'mws-text-message-part',
@@ -187,51 +209,41 @@ function readMessages() {
 
   for (const sel of selectors) {
     const found = document.querySelectorAll(sel);
-    if (found.length > 0) {
-      elements = found;
-      usedSelector = sel;
-      break;
-    }
+    if (found.length > 0) { elements = found; usedSelector = sel; break; }
   }
 
   if (!elements) {
-    // Broad fallback: grab all text nodes inside a message list
     log('warn', 'Precise selectors found nothing — trying broad fallback');
     const container = document.querySelector('mws-messages-list, .messages-container, main');
     if (container) {
       const texts = [];
-      container.querySelectorAll('p, span').forEach(el => {
-        const t = el.textContent?.trim();
+      container.querySelectorAll('p, span').forEach(node => {
+        const t = node.textContent?.trim();
         if (t && t.length > 2 && t.length < 2000) texts.push({ text: t, fromMe: false });
       });
       log('info', `Fallback found ${texts.length} text fragments`);
       return texts;
     }
-
-    log('error', 'Could not read messages — DOM structure unrecognized', {
-      tip: 'Open the debug panel, enable it, and share the output'
-    });
+    log('error', 'Could not read messages — DOM structure unrecognized');
     return [];
   }
 
   log('info', `Using selector: ${usedSelector}`, { count: elements.length });
 
   const messages = [];
-  elements.forEach(el => {
-    const text = el.textContent?.trim();
+  elements.forEach(node => {
+    const text = node.textContent?.trim();
     if (!text) return;
 
-    // Determine direction
     let fromMe = false;
-    const ancestor = el.closest('[data-e2e-is-from-me]');
+    const ancestor = node.closest('[data-e2e-is-from-me]');
     if (ancestor) {
       fromMe = ancestor.getAttribute('data-e2e-is-from-me') === 'true';
     } else {
-      const classChain = [el, el.parentElement, el.parentElement?.parentElement]
+      const classChain = [node, node.parentElement, node.parentElement?.parentElement]
         .filter(Boolean).map(e => e.className ?? '').join(' ');
       fromMe = /outgoing|from-me|self/i.test(classChain);
     }
-
     messages.push({ text, fromMe });
   });
 
@@ -239,7 +251,6 @@ function readMessages() {
     fromMe: messages.filter(m => m.fromMe).length,
     fromThem: messages.filter(m => !m.fromMe).length
   });
-
   return messages;
 }
 
@@ -252,8 +263,8 @@ function getContactName() {
     'mws-conversation-header'
   ];
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    const name = el?.textContent?.trim();
+    const node = document.querySelector(sel);
+    const name = node?.textContent?.trim();
     if (name && name.length < 80) return name;
   }
   return 'them';
@@ -272,12 +283,10 @@ function insertIntoCompose(text) {
     'textarea'
   ];
 
-  let box = null;
-  let usedSel = null;
-
+  let box = null, usedSel = null;
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) { box = el; usedSel = sel; break; }
+    const found = document.querySelector(sel);
+    if (found) { box = found; usedSel = sel; break; }
   }
 
   if (!box) {
@@ -295,7 +304,6 @@ function insertIntoCompose(text) {
     box.dispatchEvent(new Event('input', { bubbles: true }));
     box.dispatchEvent(new Event('change', { bubbles: true }));
   } else {
-    // contenteditable
     box.textContent = '';
     document.execCommand('insertText', false, text);
     box.dispatchEvent(new Event('input', { bubbles: true }));
@@ -308,10 +316,10 @@ function insertIntoCompose(text) {
 // ─── Panel UI ────────────────────────────────────────────────────────────────
 
 function setStatus(msg, level = 'info') {
-  const el = document.getElementById('mai-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.className = `mai-status mai-status-${level}`;
+  const node = document.getElementById('mai-status');
+  if (!node) return;
+  node.textContent = msg;
+  node.className = `mai-status mai-status-${level}`;
 }
 
 function getPreviewText() {
@@ -353,16 +361,10 @@ async function onGenerate() {
     const contact = getContactName();
     const recent = messages.slice(-12);
     const context = recent.map(m => `${m.fromMe ? 'Me' : contact}: ${m.text}`).join('\n');
-    const lastFromThem = messages.filter(m => !m.fromMe).pop();
 
-    log('info', 'Building prompt…', {
-      contact,
-      contextLines: recent.length,
-      lastMsg: lastFromThem?.text?.slice(0, 60)
-    });
+    log('info', 'Building prompt…', { contact, contextLines: recent.length });
 
     const prompt = `Conversation with ${contact}:\n\n${context}\n\nWrite my next reply to ${contact}'s last message.`;
-
     setStatus('Generating…');
 
     await streamPrompt(prompt, chunk => {
@@ -384,23 +386,17 @@ async function onGenerate() {
 function onInsert() {
   const text = getPreviewText();
   const placeholder = 'Click "Generate" to create a reply…';
-
   if (!text || text === placeholder) {
     setStatus('Nothing to insert — generate a response first', 'warn');
     return;
   }
-
   const ok = insertIntoCompose(text);
-  if (ok) {
-    setStatus('Inserted into compose box!', 'success');
-  } else {
-    setStatus('Could not find compose box — see debug log', 'error');
-  }
+  if (ok) setStatus('Inserted into compose box!', 'success');
+  else setStatus('Could not find compose box — see debug log', 'error');
 }
 
 function makeDraggable(panel, handle) {
   let dragging = false, ox = 0, oy = 0;
-
   handle.addEventListener('mousedown', e => {
     dragging = true;
     const r = panel.getBoundingClientRect();
@@ -409,7 +405,6 @@ function makeDraggable(panel, handle) {
     handle.style.cursor = 'grabbing';
     e.preventDefault();
   });
-
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
     panel.style.left = `${Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, e.clientX - ox))}px`;
@@ -417,11 +412,13 @@ function makeDraggable(panel, handle) {
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
   });
+  document.addEventListener('mouseup', () => { dragging = false; handle.style.cursor = 'grab'; });
+}
 
-  document.addEventListener('mouseup', () => {
-    dragging = false;
-    handle.style.cursor = 'grab';
-  });
+function labelWithHint(text, hint) {
+  const lbl = el('label', { className: 'mai-label' }, text);
+  lbl.appendChild(el('span', { className: 'mai-hint' }, hint));
+  return lbl;
 }
 
 function buildPanel() {
@@ -430,152 +427,136 @@ function buildPanel() {
   if (old) old.remove();
 
   if (!document.body) {
-    console.error('[MsgAI] buildPanel: document.body is null — cannot mount panel');
+    console.error('[MsgAI] buildPanel: document.body is null');
     return;
   }
 
-  const behaviorOptions = Object.entries(BEHAVIORS)
-    .map(([k, v]) => `<option value="${k}">${v.label}</option>`)
-    .join('');
+  // ── Behavior select ──
+  const behaviorSel = el('select', { id: 'mai-behavior-select', className: 'mai-select' });
+  for (const [k, v] of Object.entries(BEHAVIORS)) {
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = v.label;
+    behaviorSel.appendChild(opt);
+  }
 
-  const panel = document.createElement('div');
-  panel.id = 'mai-panel';
-  panel.className = 'mai-panel';
-  panel.innerHTML = `
-    <div class="mai-header" id="mai-drag-handle">
-      <span class="mai-title">🤖 Messages AI</span>
-      <div class="mai-header-btns">
-        <button id="mai-minimize-btn" class="mai-icon-btn" title="Minimize">−</button>
-        <button id="mai-close-btn" class="mai-icon-btn" title="Close">×</button>
-      </div>
-    </div>
+  // ── Custom prompt ──
+  const customPrompt = el('textarea', {
+    id: 'mai-custom-prompt',
+    className: 'mai-textarea',
+    rows: 2,
+    placeholder: 'e.g. Always end with a question, keep it under 20 words…'
+  });
 
-    <div class="mai-body" id="mai-body">
+  // ── Buttons ──
+  const generateBtn = el('button', { id: 'mai-generate-btn', className: 'mai-btn mai-btn-primary' }, '✨ Generate Response');
+  const sendBtn     = el('button', { id: 'mai-send-btn',     className: 'mai-btn mai-btn-success',    disabled: true }, '📤 Insert into Chat');
+  const regenBtn    = el('button', { id: 'mai-regen-btn',    className: 'mai-btn mai-btn-secondary' }, '🔄 Regenerate');
 
-      <div class="mai-field">
-        <label class="mai-label">Response Style</label>
-        <select id="mai-behavior-select" class="mai-select">${behaviorOptions}</select>
-      </div>
+  // ── Preview ──
+  const preview = el('div', { id: 'mai-preview', className: 'mai-preview', contentEditable: 'true' },
+    'Click "Generate" to create a reply…');
 
-      <div class="mai-field">
-        <label class="mai-label">Extra instructions <span class="mai-hint">(optional)</span></label>
-        <textarea id="mai-custom-prompt" class="mai-textarea" rows="2"
-          placeholder="e.g. Always end with a question, keep it under 20 words…"></textarea>
-      </div>
+  // ── Status ──
+  const status = el('div', { id: 'mai-status', className: 'mai-status' }, 'Ready');
 
-      <button id="mai-generate-btn" class="mai-btn mai-btn-primary">✨ Generate Response</button>
+  // ── Debug ──
+  const debugContent = el('div', { id: 'mai-debug-content', className: 'mai-debug-content' });
+  const debugClearBtn = el('button', { id: 'mai-debug-clear', className: 'mai-btn-tiny' }, 'Clear');
+  const debugBar = el('div', { className: 'mai-debug-bar' },
+    el('span', null, 'Debug Output'),
+    debugClearBtn
+  );
+  const debugPanel = el('div', { id: 'mai-debug-panel', className: 'mai-debug-panel', hidden: true },
+    debugBar, debugContent
+  );
+  const debugToggle = el('button', { id: 'mai-debug-toggle', className: 'mai-btn mai-btn-ghost' }, '🔍 Debug Log ▼');
 
-      <div class="mai-field">
-        <label class="mai-label">Preview <span class="mai-hint">(editable)</span></label>
-        <div id="mai-preview" class="mai-preview" contenteditable="true"
-          data-placeholder="Click "Generate" to create a reply…">Click "Generate" to create a reply…</div>
-      </div>
+  // ── Header ──
+  const minBtn   = el('button', { id: 'mai-minimize-btn', className: 'mai-icon-btn', title: 'Minimize' }, '−');
+  const closeBtn = el('button', { id: 'mai-close-btn',   className: 'mai-icon-btn', title: 'Close'    }, '×');
+  const header = el('div', { id: 'mai-drag-handle', className: 'mai-header' },
+    el('span', { className: 'mai-title' }, '🤖 Messages AI'),
+    el('div', { className: 'mai-header-btns' }, minBtn, closeBtn)
+  );
 
-      <div id="mai-status" class="mai-status">Ready</div>
+  // ── Body ──
+  const body = el('div', { id: 'mai-body', className: 'mai-body' },
+    el('div', { className: 'mai-field' }, el('label', { className: 'mai-label' }, 'Response Style'), behaviorSel),
+    el('div', { className: 'mai-field' }, labelWithHint('Extra instructions ', '(optional)'), customPrompt),
+    generateBtn,
+    el('div', { className: 'mai-field' }, labelWithHint('Preview ', '(editable)'), preview),
+    status,
+    el('div', { className: 'mai-row' }, sendBtn, regenBtn),
+    el('div', { className: 'mai-debug-wrap' }, debugToggle, debugPanel)
+  );
 
-      <div class="mai-row">
-        <button id="mai-send-btn" class="mai-btn mai-btn-success" disabled>📤 Insert into Chat</button>
-        <button id="mai-regen-btn" class="mai-btn mai-btn-secondary">🔄 Regenerate</button>
-      </div>
-
-      <div class="mai-debug-wrap">
-        <button id="mai-debug-toggle" class="mai-btn mai-btn-ghost">🔍 Debug Log ▼</button>
-        <div id="mai-debug-panel" class="mai-debug-panel" hidden>
-          <div class="mai-debug-bar">
-            <span>Debug Output</span>
-            <button id="mai-debug-clear" class="mai-btn-tiny">Clear</button>
-          </div>
-          <div id="mai-debug-content" class="mai-debug-content"></div>
-        </div>
-      </div>
-
-    </div>`;
-
+  const panel = el('div', { id: 'mai-panel', className: 'mai-panel' }, header, body);
   document.body.appendChild(panel);
-  makeDraggable(panel, document.getElementById('mai-drag-handle'));
+  makeDraggable(panel, header);
 
-  // Wire buttons
-  document.getElementById('mai-close-btn').onclick = () => {
-    panel.remove();
-    panelOpen = false;
-  };
+  // ── Event wiring ──
+  closeBtn.onclick = () => { panel.remove(); panelOpen = false; };
 
-  document.getElementById('mai-minimize-btn').onclick = () => {
-    const body = document.getElementById('mai-body');
-    const minBtn = document.getElementById('mai-minimize-btn');
+  minBtn.onclick = () => {
     const minimized = body.style.display === 'none';
     body.style.display = minimized ? '' : 'none';
     minBtn.textContent = minimized ? '−' : '+';
   };
 
-  document.getElementById('mai-generate-btn').onclick = onGenerate;
-  document.getElementById('mai-send-btn').onclick = onInsert;
-  document.getElementById('mai-regen-btn').onclick = onGenerate;
+  generateBtn.onclick = onGenerate;
+  sendBtn.onclick = onInsert;
+  regenBtn.onclick = onGenerate;
 
-  document.getElementById('mai-debug-toggle').onclick = () => {
-    const dp = document.getElementById('mai-debug-panel');
-    const btn = document.getElementById('mai-debug-toggle');
-    dp.hidden = !dp.hidden;
-    btn.textContent = dp.hidden ? '🔍 Debug Log ▼' : '🔍 Debug Log ▲';
-    if (!dp.hidden) refreshDebugUI();
+  debugToggle.onclick = () => {
+    debugPanel.hidden = !debugPanel.hidden;
+    debugToggle.textContent = debugPanel.hidden ? '🔍 Debug Log ▼' : '🔍 Debug Log ▲';
+    if (!debugPanel.hidden) refreshDebugUI();
   };
 
-  document.getElementById('mai-debug-clear').onclick = () => {
-    debugLogs = [];
-    refreshDebugUI();
-  };
+  debugClearBtn.onclick = () => { debugLogs = []; refreshDebugUI(); };
 
-  // Load saved settings pushed by the bridge (localStorage, MAIN-world safe)
+  // ── Load saved settings ──
   const savedBehavior = localStorage.getItem('mai_behavior');
-  const savedPrompt = localStorage.getItem('mai_customSystemPrompt');
-  if (savedBehavior) {
-    const sel = document.getElementById('mai-behavior-select');
-    if (sel) sel.value = savedBehavior;
-  }
-  if (savedPrompt) {
-    const ta = document.getElementById('mai-custom-prompt');
-    if (ta) ta.value = savedPrompt;
-  }
+  const savedPrompt   = localStorage.getItem('mai_customSystemPrompt');
+  if (savedBehavior) behaviorSel.value = savedBehavior;
+  if (savedPrompt)   customPrompt.value = savedPrompt;
 
-  // Listen for future bridge pushes (e.g. popup changed a setting)
   window.addEventListener('mai-storage-push', e => {
     const { behavior, customSystemPrompt } = e.detail ?? {};
     if (behavior) {
       localStorage.setItem('mai_behavior', behavior);
-      const sel = document.getElementById('mai-behavior-select');
-      if (sel) sel.value = behavior;
+      behaviorSel.value = behavior;
     }
     if (customSystemPrompt !== undefined) {
       localStorage.setItem('mai_customSystemPrompt', customSystemPrompt);
-      const ta = document.getElementById('mai-custom-prompt');
-      if (ta) ta.value = customSystemPrompt;
+      customPrompt.value = customSystemPrompt;
     }
   });
 
-  // Save settings on change — write to localStorage and tell the bridge to persist
-  document.getElementById('mai-behavior-select').onchange = e => {
+  behaviorSel.onchange = e => {
     localStorage.setItem('mai_behavior', e.target.value);
     window.dispatchEvent(new CustomEvent('mai-save-setting', { detail: { key: 'behavior', value: e.target.value } }));
   };
-  document.getElementById('mai-custom-prompt').onchange = e => {
+  customPrompt.onchange = e => {
     localStorage.setItem('mai_customSystemPrompt', e.target.value);
     window.dispatchEvent(new CustomEvent('mai-save-setting', { detail: { key: 'customSystemPrompt', value: e.target.value } }));
   };
 
-  // Probe AI on open
-  checkAIAvailability().then(status => {
-    if (status === 'readily') {
+  // ── Probe AI ──
+  checkAIAvailability().then(s => {
+    if (s === 'readily') {
       setStatus('Chrome AI ready', 'success');
       log('info', '✅ Chrome built-in AI is ready');
-    } else if (status === 'after-download') {
+    } else if (s === 'after-download') {
       setStatus('AI model downloading — please wait…', 'warn');
       log('warn', 'Model needs to download. Try generating in a moment.');
     } else {
       setStatus('Chrome AI unavailable — see debug log', 'error');
       log('error', 'Chrome AI not available', {
-        step1: 'Open chrome://flags/#prompt-api-for-gemini-nano → Enabled',
-        step2: 'Open chrome://flags/#optimization-guide-on-device-model → Enabled BypassPerfRequirement',
-        step3: 'Go to chrome://components → update "Optimization Guide On Device Model"',
+        step1: 'chrome://flags/#prompt-api-for-gemini-nano → Enabled',
+        step2: 'chrome://flags/#optimization-guide-on-device-model → Enabled BypassPerfRequirement',
+        step3: 'chrome://components → update Optimization Guide On Device Model',
         step4: 'Restart Chrome'
       });
     }
@@ -589,18 +570,10 @@ function buildPanel() {
 function buildFAB() {
   if (document.getElementById('mai-fab')) return;
 
-  // document.body can be null while the SPA is still bootstrapping
   const target = document.body ?? document.documentElement;
-  if (!target) {
-    console.warn('[MsgAI] No mount target yet, will retry…');
-    return;
-  }
+  if (!target) { console.warn('[MsgAI] No mount target yet, will retry…'); return; }
 
-  const fab = document.createElement('button');
-  fab.id = 'mai-fab';
-  fab.className = 'mai-fab';
-  fab.title = 'Open Messages AI Assistant';
-  fab.textContent = '🤖';
+  const fab = el('button', { id: 'mai-fab', className: 'mai-fab', title: 'Open Messages AI Assistant' }, '🤖');
   fab.onclick = () => {
     try {
       if (panelOpen) {
@@ -620,19 +593,11 @@ function buildFAB() {
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 function tryInit() {
-  try {
-    buildFAB();
-  } catch (e) {
-    console.error('[MsgAI] init error:', e);
-  }
+  try { buildFAB(); } catch (e) { console.error('[MsgAI] init error:', e); }
 }
 
-// Keep FAB alive through SPA re-renders and body replacements
-setInterval(() => {
-  if (!document.getElementById('mai-fab')) tryInit();
-}, 1500);
+setInterval(() => { if (!document.getElementById('mai-fab')) tryInit(); }, 1500);
 
-// Re-attach on SPA navigation (URL change without page reload)
 let lastHref = location.href;
 new MutationObserver(() => {
   if (location.href !== lastHref) {
@@ -642,7 +607,6 @@ new MutationObserver(() => {
   }
 }).observe(document, { subtree: true, childList: true });
 
-// Boot attempts — staggered to handle slow SPA render
 tryInit();
 setTimeout(tryInit, 300);
 setTimeout(tryInit, 1000);
