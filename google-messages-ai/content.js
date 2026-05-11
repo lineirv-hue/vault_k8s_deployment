@@ -386,10 +386,20 @@ async function onGenerate() {
     // Check allowed conversations (empty list = all allowed)
     const allowed = getAllowedConvs();
     const contact = getContactName();
-    if (allowed.length > 0 && !allowed.includes(contact)) {
-      setStatus(`"${contact}" is not in your allowed list`, 'warn');
-      if (preview) preview.textContent = `This conversation ("${contact}") is not enabled. Check it in the Allowed Conversations list.`;
-      return;
+    log('info', 'Conversation allowlist check', { contact, allowed });
+
+    if (allowed.length > 0) {
+      const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+      const contactNorm = norm(contact);
+      const match = allowed.some(name => {
+        const n = norm(name);
+        return n === contactNorm || n.includes(contactNorm) || contactNorm.includes(n);
+      });
+      if (!match) {
+        setStatus(`"${contact}" is not in your allowed list`, 'warn');
+        if (preview) preview.textContent = `"${contact}" is not enabled.\n\nAllowed: ${allowed.join(', ')}\n\nOpen the debug log to see the exact name comparison.`;
+        return;
+      }
     }
 
     setStatus('Connecting to Ollama…');
