@@ -425,8 +425,14 @@ function makeDraggable(panel, handle) {
 }
 
 function buildPanel() {
+  console.log('[MsgAI] buildPanel() called');
   const old = document.getElementById('mai-panel');
   if (old) old.remove();
+
+  if (!document.body) {
+    console.error('[MsgAI] buildPanel: document.body is null — cannot mount panel');
+    return;
+  }
 
   const behaviorOptions = Object.entries(BEHAVIORS)
     .map(([k, v]) => `<option value="${k}">${v.label}</option>`)
@@ -596,11 +602,15 @@ function buildFAB() {
   fab.title = 'Open Messages AI Assistant';
   fab.textContent = '🤖';
   fab.onclick = () => {
-    if (panelOpen) {
-      document.getElementById('mai-panel')?.remove();
-      panelOpen = false;
-    } else {
-      buildPanel();
+    try {
+      if (panelOpen) {
+        document.getElementById('mai-panel')?.remove();
+        panelOpen = false;
+      } else {
+        buildPanel();
+      }
+    } catch (e) {
+      console.error('[MsgAI] FAB click error:', e);
     }
   };
   target.appendChild(fab);
